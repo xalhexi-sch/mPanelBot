@@ -21,6 +21,7 @@ const { LinkService } = require("./services/linkService");
 const { ModerationService } = require("./services/moderationService");
 
 const { DiscordBotClient } = require("./discord/client");
+const { GuildPolicy } = require("./discord/guildPolicy");
 const { RoleSyncManager } = require("./discord/roles/roleSync");
 const { DiscordLogger } = require("./discord/logs/discordLogger");
 const { RaidNotifier } = require("./discord/raid/raidNotifier");
@@ -52,6 +53,10 @@ async function main() {
   const guildRepo = new GuildRepository(dbManager);
   const auditRepo = new AuditRepository(dbManager);
   const snapshotRepo = new SnapshotRepository(dbManager);
+  const guildPolicy = new GuildPolicy({ dbManager, guildRepo, configuredIds: config.discord.guildIds });
+  if (guildPolicy.isUnclaimed) {
+    console.warn("[discord] No guild is pinned yet: the first Administrator to run /setup claims this bot. Set discord.guildIds in config.json to pin it explicitly, and turn off \"Public Bot\" in the Developer Portal.");
+  }
 
   // 3. Optional Pterodactyl Integration
   const pterodactylClient = new PterodactylClient(config.integrations.pterodactyl);
@@ -69,6 +74,7 @@ async function main() {
     serverKeys: config.network.serverKeys,
     messageRatePerSec: config.network.messageRatePerSec,
     messageBurst: config.network.messageBurst,
+    trustProxy: config.network.trustProxy,
   });
 
   const healthServer = createHealthServer({
@@ -82,6 +88,8 @@ async function main() {
     wsServer,
     pterodactylClient,
     auditRepo,
+    listKnownServerIds: () => snapshotRepo.getAllSnapshots().map((s) => s.serverId),
+    pterodactylServerId: config.integrations.pterodactyl.mpanelServerId || null,
   });
 
   let roleSyncManager = null;
@@ -111,6 +119,7 @@ async function main() {
   const discordBot = new DiscordBotClient({
     token: config.discord.token,
     clientId: config.discord.clientId,
+    guildPolicy,
     guildRepo,
     linkRepo,
     statsRepo,
@@ -173,7 +182,9 @@ async function main() {
   });
 
   wsServer.on("envelope", (session, envelope) => {
-    messageRouter.handleEnvelope(session, envelope);
+    messageRouter.handleEnvelope(session, envelope).catch((err) => {
+      console.error(`[router] Unhandled error for ${session.serverId}: ${err.message}`);
+    });
   });
 
   wsServer.on("server_connected", (session) => {
@@ -190,6 +201,11 @@ async function main() {
 
   wsServer.on("rate_limited", ({ remoteAddress, serverId }) => {
     console.warn("[websocket] Rate limit exceeded by " + (serverId || remoteAddress) + "; connection closed.");
+  });
+
+  // A stray rejected promise must never take the whole bot (and every game connection) down.
+  process.on("unhandledRejection", (reason) => {
+    console.error("[system] Unhandled promise rejection:", reason instanceof Error ? reason.message : reason);
   });
 
   // 8. Start HTTP / WebSocket listener

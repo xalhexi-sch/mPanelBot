@@ -10,6 +10,8 @@ const {
 } = require("./protocol");
 const { AuthThrottle, TokenBucket } = require("./threatGuard");
 
+const LOOPBACK = /^(::1|::ffff:127\.\d+\.\d+\.\d+|127\.\d+\.\d+\.\d+)$/;
+
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 
 /** Constant-time comparison that does not leak the secret's length (both sides are hashed first). */
@@ -28,8 +30,12 @@ class GameWebSocketServer extends EventEmitter {
     messageRatePerSec = 40,
     messageBurst = 200,
     authThrottle = new AuthThrottle(),
+    trustProxy = false,
   }) {
     super();
+    // Only when a TLS-terminating reverse proxy on this machine fronts the port: use the address it appends to
+    // X-Forwarded-For. Otherwise every game server would share the proxy's address and one bad client could lock all out.
+    this.trustProxy = Boolean(trustProxy);
     this.apiKey = String(apiKey || "");
     // Optional dedicated key per ServerId. When a server has one, the shared key can no longer impersonate it.
     this.serverKeys = new Map(Object.entries(serverKeys || {}).filter(([id, k]) => SERVER_ID_PATTERN.test(id) && k));
@@ -61,14 +67,32 @@ class GameWebSocketServer extends EventEmitter {
     return result;
   }
 
+  /** Peer address used for throttling (the real client when a trusted local proxy supplies it). */
+  clientAddress(req) {
+    const peer = req.socket?.remoteAddress || "unknown";
+    if (this.trustProxy && LOOPBACK.test(peer)) {
+      const xff = String(req.headers?.["x-forwarded-for"] || "").split(",").map((s) => s.trim()).filter(Boolean);
+      if (xff.length > 0) return xff[xff.length - 1];
+    }
+    return peer;
+  }
+
+  /** Fail-safe default: everything is throttled. Enable `trustProxy` when behind a local reverse proxy. */
+  isThrottleExempt() {
+    return false;
+  }
+
   isAuthorizedHeader(headerValue) {
     return this.authenticate(headerValue).ok;
   }
 
   handleUpgrade(req, socket, head) {
-    const address = socket.remoteAddress || "unknown";
+    // Without a listener, a connection reset during/after the upgrade is an uncaught 'error' that kills the process.
+    socket.on("error", () => {});
+    const address = this.clientAddress(req);
+    const throttled = !this.isThrottleExempt(address);
 
-    const blockedMs = this.authThrottle.blockedFor(address);
+    const blockedMs = throttled ? this.authThrottle.blockedFor(address) : 0;
     if (blockedMs > 0) {
       socket.write("HTTP/1.1 429 Too Many Requests\r\nRetry-After: " + Math.ceil(blockedMs / 1000) + "\r\nConnection: close\r\n\r\n");
       socket.destroy();
@@ -78,7 +102,7 @@ class GameWebSocketServer extends EventEmitter {
     const auth = this.authenticate(req.headers["authorization"] || req.headers["x-api-key"]);
 
     if (!auth.ok) {
-      const nowBlocked = this.authThrottle.recordFailure(address);
+      const nowBlocked = throttled ? this.authThrottle.recordFailure(address) : false;
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
       socket.destroy();
       this.emit("auth_failed", { remoteAddress: address, url: req.url, blocked: nowBlocked });
@@ -86,6 +110,7 @@ class GameWebSocketServer extends EventEmitter {
     }
 
     this.authThrottle.recordSuccess(address);
+    req.clientAddress = address;
     this.wss.handleUpgrade(req, socket, head, (ws) => {
       req.keyServerId = auth.keyServerId;
       this.wss.emit("connection", ws, req);
@@ -116,7 +141,7 @@ class GameWebSocketServer extends EventEmitter {
   }
 
   handleConnection(ws, req) {
-    const remoteAddress = req.socket.remoteAddress;
+    const remoteAddress = req.clientAddress || req.socket.remoteAddress;
     let establishedSession = null;
     const bucket = new TokenBucket({ ratePerSec: this.messageRatePerSec, burst: this.messageBurst });
 
@@ -128,6 +153,11 @@ class GameWebSocketServer extends EventEmitter {
         } catch {}
       }
     }, 10000);
+
+    // Pre-hello there is no Session yet to own socket errors (oversized frame, protocol violation...).
+    // An 'error' event with no listener would crash the whole bot.
+    ws.on("error", () => {});
+    ws.on("close", () => clearTimeout(helloTimeout));
 
     ws.on("message", (raw) => {
       if (!bucket.take()) {
@@ -175,6 +205,7 @@ class GameWebSocketServer extends EventEmitter {
 
         clearTimeout(helloTimeout);
         const serverId = parsed.serverId.trim();
+        parsed.serverId = serverId;
         const payload = parsed.payload || {};
 
         // Identity rules: well-formed id, and a per-server key may only speak for its own server.
@@ -182,7 +213,7 @@ class GameWebSocketServer extends EventEmitter {
         const keyBelongsElsewhere = req.keyServerId && req.keyServerId !== serverId;
         const sharedKeyOnProtectedServer = dedicated && !req.keyServerId;
         if (!SERVER_ID_PATTERN.test(serverId) || keyBelongsElsewhere || sharedKeyOnProtectedServer) {
-          this.authThrottle.recordFailure(remoteAddress);
+          if (!this.isThrottleExempt(remoteAddress)) this.authThrottle.recordFailure(remoteAddress);
           this.emit("auth_failed", { remoteAddress, url: "hello", blocked: false });
           ws.close(4005, "Not authorised for this server id");
           return;
@@ -221,6 +252,13 @@ class GameWebSocketServer extends EventEmitter {
         establishedSession.send(welcome);
 
         this.emit("server_connected", establishedSession);
+        return;
+      }
+
+      // An authenticated connection may only speak for its own server id.
+      if (parsed.serverId !== establishedSession.serverId) {
+        this.emit("identity_mismatch", { serverId: establishedSession.serverId, claimed: String(parsed.serverId).slice(0, 64) });
+        establishedSession.close(4005, "serverId does not match the authenticated session");
         return;
       }
 

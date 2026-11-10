@@ -55,10 +55,10 @@ describe("Event Deduplication & Idempotency", () => {
       v: 1,
       id: "dup-event-99",
       kind: "event",
-      type: "server.snapshot",
+      type: "player.chat",
       serverId: "survival-1",
       occurredAtUtc: new Date().toISOString(),
-      payload: { onlineCount: 5 },
+      payload: { message: "hi" },
     };
 
     // First arrival -> persisted

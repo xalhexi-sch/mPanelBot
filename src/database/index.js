@@ -12,6 +12,7 @@ class DatabaseManager {
       }
     }
 
+    this._stmts = new Map();
     this.db = new DatabaseSync(this.dbPath);
     this.init();
   }
@@ -59,8 +60,14 @@ class DatabaseManager {
     return this.db.exec(sql);
   }
 
+  /** Prepared statements are cached: parsing SQL on every event is pure overhead on hot paths (chat, stats, dedupe). */
   prepare(sql) {
-    return this.db.prepare(sql);
+    let stmt = this._stmts.get(sql);
+    if (!stmt) {
+      stmt = this.db.prepare(sql);
+      if (this._stmts.size < 256) this._stmts.set(sql, stmt);
+    }
+    return stmt;
   }
 
   transaction(fn) {
@@ -78,6 +85,7 @@ class DatabaseManager {
   }
 
   close() {
+    this._stmts.clear();
     try {
       this.db.close();
     } catch {}

@@ -84,11 +84,18 @@ function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
     throw new Error("Missing or invalid API key in configuration.");
   }
 
+  if (apiKey.length < 16) {
+    throw new Error("The API key is too short (minimum 16 characters). Run `npm run setup` to generate a strong one.");
+  }
+
   if (configExists) warnIfConfigExposed(configPath);
 
   return {
     discord: {
       token,
+      guildIds: Array.isArray(parsed?.discord?.guildIds)
+        ? parsed.discord.guildIds.map(String)
+        : String(process.env.DISCORD_GUILD_ID || "").split(",").map((s) => s.trim()).filter(Boolean),
       clientId: (parsed?.discord?.clientId || process.env.DISCORD_CLIENT_ID || process.env.CLIENT_ID)
         ? String(parsed?.discord?.clientId || process.env.DISCORD_CLIENT_ID || process.env.CLIENT_ID).trim()
         : null,
@@ -102,6 +109,7 @@ function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
       serverKeys: loadServerKeys(parsed?.network?.serverKeys),
       messageRatePerSec: Number(parsed?.network?.messageRatePerSec || 40),
       messageBurst: Number(parsed?.network?.messageBurst || 200),
+      trustProxy: Boolean(parsed?.network?.trustProxy),
     },
     storage: {
       sqlitePath: process.env.SQLITE_PATH || parsed?.storage?.sqlitePath || "./data/mpanel.sqlite",
@@ -113,6 +121,8 @@ function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
         panelUrl: (process.env.PTERO_PANEL_URL || parsed?.integrations?.pterodactyl?.panelUrl || "").replace(/\/$/, ""),
         clientApiToken: process.env.PTERO_CLIENT_API_TOKEN || parsed?.integrations?.pterodactyl?.clientApiToken || "",
         serverIdentifier: process.env.PTERO_SERVER_IDENTIFIER || parsed?.integrations?.pterodactyl?.serverIdentifier || "",
+        // The mPanel ServerId this Pterodactyl server corresponds to; the console fallback only runs for that server.
+        mpanelServerId: parsed?.integrations?.pterodactyl?.mpanelServerId || null,
       },
     },
   };

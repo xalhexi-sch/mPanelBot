@@ -250,6 +250,7 @@ describe("Chat relay (embeds, loop prevention, setup)", () => {
     const interactionFor = (guildId, channels, sink) => ({
       client: fakeClient,
       guild: { id: guildId, members: { me: {} } },
+      memberPermissions: { has: () => true },
       options: { getSubcommand: () => "channels", getChannel: (name) => channels[name] || null },
       reply: async (obj) => { sink.content = obj.content; },
     });

@@ -27,6 +27,13 @@ class DedupeRepository {
     return res.changes > 0;
   }
 
+  /** Removes a claim so a failed event can be retried by the sender. */
+  releaseEvent(serverId, eventId) {
+    this.dbManager
+      .prepare("DELETE FROM processed_events WHERE server_id = ? AND event_id = ?")
+      .run(String(serverId).trim(), String(eventId).trim());
+  }
+
   pruneOldEvents(maxAgeDays = 7) {
     const cutoff = new Date(Date.now() - maxAgeDays * 86400 * 1000).toISOString();
     const stmt = this.dbManager.prepare("DELETE FROM processed_events WHERE processed_at_utc < ?");
