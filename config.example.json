@@ -1,14 +1,18 @@
 {
   "discord": {
     "token": "YOUR_DISCORD_BOT_TOKEN",
-    "clientId": "YOUR_DISCORD_APPLICATION_CLIENT_ID"
+    "clientId": "YOUR_DISCORD_APPLICATION_CLIENT_ID",
+    "guildIds": [
+      "YOUR_DISCORD_SERVER_ID"
+    ]
   },
   "network": {
     "bindAddress": "0.0.0.0",
     "port": 28600,
     "apiKey": "PASTE_OR_GENERATE_SHARED_API_KEY",
     "heartbeatIntervalMs": 30000,
-    "maxPayloadSizeBytes": 262144
+    "maxPayloadSizeBytes": 262144,
+    "trustProxy": false
   },
   "storage": {
     "sqlitePath": "./data/mpanel.sqlite"
@@ -36,7 +40,8 @@
       "enabled": false,
       "panelUrl": "https://panel.example.com",
       "clientApiToken": "YOUR_PTERODACTYL_CLIENT_API_KEY",
-      "serverIdentifier": "YOUR_PTERODACTYL_SERVER_ID"
+      "serverIdentifier": "YOUR_PTERODACTYL_SERVER_ID",
+      "mpanelServerId": "survival-1"
     }
   }
 }
