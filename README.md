@@ -221,3 +221,12 @@ SQLite (fed by plugin events) is the default. To show stats from a legacy MySQL 
 
 `npm test` runs unit tests plus `test/e2e.test.js`, which drives the real WebSocket server with a fake plugin client
 using the exact payload shapes the C# plugin emits (stats, snapshots, logs, raid fan-out, link flow, moderation round trip).
+
+## Security hardening
+
+- **Transport:** the API key is sent in the WebSocket handshake. The plugin refuses plain `ws://` unless the bot is on loopback, a private/container network or a VPN; use `wss://` for anything remote. Same-host Pterodactyl setups can use the bot container's name, e.g. `ws://<bot-container-id>:27022/ws`.
+- **Login lockout:** 5 wrong keys within a minute block that address for 5 minutes (`429`). Each connection is also rate-limited (default 40 msg/s sustained, burst 200; `network.messageRatePerSec` / `network.messageBurst`).
+- **Per-server keys (optional):** add `"network": { "serverKeys": { "survival-1": "<24+ char secret>" } }`. A server with its own key can no longer be impersonated with the shared key, and its key cannot speak for any other server.
+- **Health endpoint:** `GET /health` returns only `{"status":"ok"}`. Connected-server details need `Authorization: Bearer <shared key>`.
+- **Stored secrets:** a dedicated `security.encryptionKey` is generated into `config.json` on first start (file mode 0600) and existing secrets are migrated, so rotating the API key never locks the bot out of its own data.
+- **Dependencies** are pinned to exact versions; run `npm audit` after updates.
