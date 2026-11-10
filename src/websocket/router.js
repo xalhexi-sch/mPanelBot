@@ -52,6 +52,10 @@ class MessageRouter {
   async processEvent(serverId, type, payload) {
     switch (type) {
       case "server.snapshot":
+        if (!payload.serverName && !this._warnedEmptySnapshot) {
+          this._warnedEmptySnapshot = true;
+          console.warn(`[router] server.snapshot from ${serverId} has no serverName; payload keys: ${Object.keys(payload).join(",") || "(none)"}`);
+        }
         this.snapshotRepo.saveSnapshot(serverId, payload);
         if (this.discordClient) {
           this.discordClient.updatePresence();
