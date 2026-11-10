@@ -1,0 +1,19 @@
+{
+  "name": "mpanel-bot",
+  "version": "1.0.0",
+  "description": "mPanel Discord Bot and Embedded WebSocket Backend for Unturned",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "setup": "node src/setup.js",
+    "test": "node --test test/**/*.test.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

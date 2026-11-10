@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime secrets and configurations
+config.json
+config.local.json
+.env
+.env.*
+
+# Persistent SQLite database files (preserve directory via data/.gitkeep)
+data/*.sqlite*
+data/*.db*
+data/*.sqlite3*
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
+# Runtime logs (anchor to root or un-ignore discord logger source)
+/logs/
+*.log
+!src/discord/logs/
+
+# OS & Editor artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+coverage/
+TestResults/
