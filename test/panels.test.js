@@ -303,3 +303,38 @@ describe("steam profile, join card and farmbots", () => {
     assert.match(e.fields[5].value, /\*\*99\*\* Resources/);
   });
 });
+
+describe("group field", () => {
+  const { DiscordLogger } = require("../src/discord/logs/discordLogger");
+  const logger = (getGroup) => new DiscordLogger({ avatars: { getProfile: async () => ({}), getGroup }, groupWaitMs: 0 });
+  const STEAM_GID = "103582791475043382"; // universe 1, type 7 (clan)
+
+  it("a Steam group is a clickable link using the name Steam reports", async () => {
+    const l = logger(async () => ({ name: "!UTD!", url: "https://steamcommunity.com/groups/UTDONTOP" }));
+    assert.strictEqual(await l._formatGroup({ kind: "steam", id: STEAM_GID }), "[!UTD!](https://steamcommunity.com/groups/UTDONTOP)");
+  });
+
+  it("uses the plugin's name and url for a Steam group without calling Steam", async () => {
+    let calls = 0;
+    const l = logger(async () => (calls++, null));
+    assert.strictEqual(await l._formatGroup({ kind: "steam", id: STEAM_GID, name: "Raiders", url: "https://steamcommunity.com/groups/raiders" }), "[Raiders](https://steamcommunity.com/groups/raiders)");
+    assert.strictEqual(calls, 0);
+  });
+
+  it("an in-game group is only a name, never a link (even if a url sneaks in)", async () => {
+    const l = logger(async () => ({ name: "WRONG", url: "https://x" }));
+    assert.strictEqual(await l._formatGroup({ kind: "ingame", id: "5", name: "Night Crew", url: "https://evil.example" }), "Night Crew");
+    assert.strictEqual(await l._formatGroup({ kind: "ingame", id: "5" }), "None");
+  });
+
+  it("when Steam is unreachable a real Steam group id still links to its gid page", async () => {
+    const l = logger(async () => null);
+    assert.strictEqual(await l._formatGroup({ kind: "steam", id: STEAM_GID }), `[Steam Group](https://steamcommunity.com/gid/${STEAM_GID})`);
+    assert.strictEqual(await l._formatGroup({ kind: "steam", id: "12345" }), "None", "unknown id types are not linked");
+  });
+
+  it("markdown in a group name cannot break out of the link", async () => {
+    const l = logger(async () => ({ name: "[click](https://evil)", url: "https://steamcommunity.com/groups/x" }));
+    assert.strictEqual(await l._formatGroup({ kind: "steam", id: STEAM_GID }), "[clickhttps://evil](https://steamcommunity.com/groups/x)");
+  });
+});

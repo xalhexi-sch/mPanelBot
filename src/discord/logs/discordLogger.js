@@ -40,6 +40,18 @@ function formatPlayer(name, steamId) {
   return safeName;
 }
 
+/** Steam (clan) ids: universe 1, account type 7. In-game groups use a different id type. */
+function looksLikeSteamGroupId(id) {
+  try {
+    const v = BigInt(String(id));
+    return v >> 56n === 1n && ((v >> 52n) & 0xfn) === 7n;
+  } catch {
+    return false;
+  }
+}
+
+const cleanLabel = (name) => String(name || "").replace(/[\[\]()*_`~|>]/g, "").trim().slice(0, 64);
+
 class DiscordLogger {
   constructor({ discordClient, guildRepo, avatars = null, snapshotRepo = null, linkRepo = null, groupWaitMs = 6000 } = {}) {
     this.groupWaitMs = groupWaitMs;
@@ -148,6 +160,29 @@ class DiscordLogger {
     }
   }
 
+  /**
+   * Group field: a Steam group is a clickable link to its Steam page; an in-game group (or anything we cannot
+   * identify as a Steam group) is just its name, and "None" when there is nothing to show.
+   */
+  async _formatGroup(group) {
+    const isSteam = String(group.kind || "").toLowerCase() !== "ingame";
+    let name = cleanLabel(group.name);
+    if (!isSteam) return name || "None";
+
+    let url = group.url || null;
+    if (this.avatars && group.id && (!name || name === String(group.id))) {
+      const found = await this.avatars.getGroup(group.id).catch(() => null);
+      if (found) {
+        name = cleanLabel(found.name);
+        url = found.url;
+      }
+    }
+    if (!url && group.id && looksLikeSteamGroupId(group.id)) url = `https://steamcommunity.com/gid/${group.id}`;
+
+    if (name && name !== String(group.id)) return url ? `[${name}](${url})` : name;
+    return url ? `[Steam Group](${url})` : "None";
+  }
+
   /** Old Blood Horizon "Player Joined / Player Left" card: avatar thumbnail, Discord link, Steam group, account age. */
   async _joinLeaveEmbed(kind, data) {
     const { serverId, steamId, playerName, group } = data;
@@ -161,17 +196,7 @@ class DiscordLogger {
       const gid = await this._groupIdFor(steamId, kind === "join" ? this.groupWaitMs : 0);
       if (gid && gid !== "0") g0 = { kind: "steam", id: gid };
     }
-    if (g0) {
-      const group2 = g0;
-      let name = group2.name;
-      let url = group2.url;
-      if (this.avatars && group2.id && (!name || name === group2.id)) {
-        const g = await this.avatars.getGroup(group2.id).catch(() => null);
-        if (g) ({ name, url } = g);
-      }
-      const label = String(name || group2.id).replace(/[\[\]()*_`~|>]/g, "").slice(0, 64);
-      groupText = url ? `[${label}](${url})` : label;
-    }
+    if (g0) groupText = await this._formatGroup(g0);
 
     let discordText = "Unlinked";
     try {
