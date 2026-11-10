@@ -18,6 +18,7 @@ class LivePanels {
     this.timers = [];
     this.lastHash = new Map(); // `${guildId}:status|leaderboard` -> serialized payload
     this.tick = 0;
+    this.inFlight = new Map();
   }
 
   start() {
@@ -59,8 +60,18 @@ class LivePanels {
     return { content: "", embeds: [buildLeaderboardEmbed(boards, { source: this.statsService.source }).toJSON()] };
   }
 
+  /** Serialises refreshes per guild+panel so a timer tick and `/setup panels` can never both post a new message. */
+  refreshPanel(cfg, kind) {
+    const key = `${cfg.guildId}:${kind}`;
+    const running = this.inFlight.get(key);
+    if (running) return running;
+    const p = this._refreshPanel(cfg, kind).finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, p);
+    return p;
+  }
+
   /** Edits the stored message, or creates it (and stores its id) when missing/deleted. */
-  async refreshPanel(cfg, kind) {
+  async _refreshPanel(cfg, kind) {
     const channelId = kind === "status" ? cfg.statusChannelId : cfg.leaderboardChannelId;
     const messageId = kind === "status" ? cfg.statusMessageId : cfg.leaderboardMessageId;
     const idField = kind === "status" ? "statusMessageId" : "leaderboardMessageId";

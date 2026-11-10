@@ -189,6 +189,9 @@ async function main() {
     await discordBot.start();
   } catch (err) {
     console.error(`[discord] Failed to login to Discord: ${err.message}`);
+    if (/intent/i.test(err.message)) {
+      console.error("[discord] Enable the 'Server Members' and 'Message Content' privileged intents: Developer Portal > your app > Bot.");
+    }
     console.warn("[discord] Bot will continue hosting the WebSocket server for game connections.");
   }
 

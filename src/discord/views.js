@@ -45,9 +45,9 @@ function buildServerStatusEmbed(snap, { online = true, page = 0, perPage = 9 } =
   players.sort((a, b) => (Number(b.sessionDurationSeconds) || 0) - (Number(a.sessionDurationSeconds) || 0));
 
   const count = Number(snap.onlineCount ?? snap.onlinePlayers ?? players.length) || 0;
-  const pages = Math.max(1, Math.ceil(players.length / perPage));
+  const pages = perPage > 0 ? Math.max(1, Math.ceil(players.length / perPage)) : 1;
   const cur = ((page % pages) + pages) % pages;
-  const slice = players.slice(cur * perPage, cur * perPage + perPage);
+  const slice = perPage > 0 ? players.slice(cur * perPage, cur * perPage + perPage) : [];
 
   const embed = new EmbedBuilder()
     .setColor(online ? BRAND_COLOR : OFFLINE_COLOR)
@@ -86,15 +86,33 @@ function buildServerStatusEmbed(snap, { online = true, page = 0, perPage = 9 } =
   return embed;
 }
 
-/** All servers, online first. Discord allows 10 embeds per message. */
+/** Total characters Discord counts towards the 6000-per-message embed limit. */
+function embedLength(e) {
+  const j = typeof e.toJSON === "function" ? e.toJSON() : e;
+  let n = (j.title || "").length + (j.description || "").length + (j.footer?.text || "").length + (j.author?.name || "").length;
+  for (const f of j.fields || []) n += (f.name || "").length + (f.value || "").length;
+  return n;
+}
+
+const MESSAGE_EMBED_BUDGET = 5600; // safety margin under Discord's 6000
+
+/** All servers, online first. Player grids shrink as servers are added so one message always fits Discord's limits. */
 function buildStatusEmbeds(snapshots, activeIds, { page = 0 } = {}) {
   if (!snapshots.length) {
     return [
       new EmbedBuilder().setColor(OFFLINE_COLOR).setTitle("📡 Live Status").setDescription("_No servers have reported yet._"),
     ];
   }
-  const sorted = [...snapshots].sort((a, b) => Number(activeIds.has(b.serverId)) - Number(activeIds.has(a.serverId)));
-  return sorted.slice(0, 10).map((s) => buildServerStatusEmbed(s, { online: activeIds.has(s.serverId), page }));
+  const sorted = [...snapshots]
+    .sort((a, b) => Number(activeIds.has(b.serverId)) - Number(activeIds.has(a.serverId)))
+    .slice(0, 10);
+
+  let embeds = [];
+  for (const perPage of [9, 6, 3, 0]) {
+    embeds = sorted.map((s) => buildServerStatusEmbed(s, { online: activeIds.has(s.serverId), page, perPage }));
+    if (embeds.reduce((n, e) => n + embedLength(e), 0) <= MESSAGE_EMBED_BUDGET) break;
+  }
+  return embeds;
 }
 
 function boardColumn(rows, valueFn) {
@@ -159,6 +177,8 @@ module.exports = {
   kdr,
   buildServerStatusEmbed,
   buildStatusEmbeds,
+  embedLength,
+  MESSAGE_EMBED_BUDGET,
   buildLeaderboardEmbed,
   buildSingleBoardEmbed,
   buildPlayerStatsEmbed,

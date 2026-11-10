@@ -23,7 +23,7 @@ Standalone Discord bot and embedded WebSocket backend for Unturned game networks
 
 - **Node.js 22.0.0 or higher** (recommended for native `node:sqlite` database support).
 - A **Discord Bot Application & Token** (from [Discord Developer Portal](https://discord.com/developers/applications)).
-  - Requires `Guilds`, `GuildMessages`, `MessageContent`, and `GuildMembers` gateway intents.
+  - Requires `Guilds`, `GuildMessages`, `MessageContent`, and `GuildMembers` gateway intents. **Enable the `Server Members` and `Message Content` privileged intents** in the Discord Developer Portal (Bot tab) or login fails.
 
 ---
 

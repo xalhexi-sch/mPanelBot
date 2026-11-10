@@ -8,7 +8,7 @@ class LinkService {
     if (!code || !steamId) {
       throw new Error("Missing code or steamId in link request.");
     }
-    return this.linkRepo.storeCode(code, steamId, playerName, serverId, ttlSeconds);
+    return this.linkRepo.storeCode(String(code).trim().toUpperCase(), steamId, playerName, serverId, ttlSeconds);
   }
 
   async redeemCode({ code, discordId, guild = null }) {

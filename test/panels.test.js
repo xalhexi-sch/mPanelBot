@@ -7,7 +7,7 @@ const { SnapshotRepository } = require("../src/database/repositories/snapshotRep
 const { StatsRepository } = require("../src/database/repositories/statsRepository");
 const { StatsService, MySqlStatsSource } = require("../src/services/statsService");
 const { LivePanels } = require("../src/discord/livePanels");
-const { buildServerStatusEmbed, buildLeaderboardEmbed, formatDuration, trimName } = require("../src/discord/views");
+const { buildServerStatusEmbed, buildStatusEmbeds, buildLeaderboardEmbed, formatDuration, trimName, embedLength } = require("../src/discord/views");
 
 const silent = { warn() {}, log() {} };
 
@@ -45,6 +45,29 @@ describe("views", () => {
     assert.strictEqual(e.fields.length, 3);
     for (const f of e.fields) assert.ok(f.value.length <= 1024);
   });
+});
+
+describe("status message size", () => {
+  const mkServer = (i, players) => ({
+    serverId: `server-${i}`,
+    serverName: `A Rather Long Server Name Number ${i}`,
+    map: "PEI",
+    onlinePlayers: players,
+    maxPlayers: 48,
+    updatedAtUtc: new Date().toISOString(),
+    players: Array.from({ length: players }, (_, p) => ({ steamId: `7656119800000${i}${String(p).padStart(4, "0")}`, playerName: "N".repeat(30), characterName: "C".repeat(30), pingMs: 123, sessionDurationSeconds: 99999 + p })),
+  });
+
+  for (const servers of [1, 3, 6, 10]) {
+    it(`stays under Discord's 6000-char embed limit with ${servers} full server(s)`, () => {
+      const snaps = Array.from({ length: servers }, (_, i) => mkServer(i, 40));
+      const embeds = buildStatusEmbeds(snaps, new Set(snaps.map((s) => s.serverId)));
+      const total = embeds.reduce((n, e) => n + embedLength(e), 0);
+      assert.ok(total <= 6000, `total ${total}`);
+      assert.ok(embeds.length <= 10);
+      for (const e of embeds) assert.ok(e.toJSON().fields.length <= 25);
+    });
+  }
 });
 
 describe("MySQL stats source (optional)", () => {
@@ -144,6 +167,15 @@ describe("live panels", () => {
     assert.strictEqual(await panels.refreshPanel(cfg, "leaderboard"), true);
     assert.strictEqual(await panels.refreshPanel(cfg, "leaderboard"), false);
     assert.strictEqual(edits.length, 1);
+    db.close();
+  });
+
+  it("never posts two messages when refreshes overlap", async () => {
+    const { db, guildRepo, panels, sent } = setup();
+    guildRepo.upsertGuildConfig("g1", { statusChannelId: "c1" });
+    const cfg = guildRepo.getGuildConfig("g1");
+    await Promise.all([panels.refreshPanel(cfg, "status"), panels.refreshPanel({ ...cfg }, "status"), panels.refreshAll("status")]);
+    assert.strictEqual(sent.length, 1);
     db.close();
   });
 

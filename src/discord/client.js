@@ -107,7 +107,8 @@ class DiscordBotClient {
       this.updatePresence();
       if (this.livePanels) this.livePanels.start();
 
-      // Register slash commands if clientId is provided
+      // Register slash commands; fall back to the application id Discord reports for this token
+      if (!this.clientId) this.clientId = this.client.application?.id || null;
       if (this.clientId) {
         await this.deployCommands();
       }
