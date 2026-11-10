@@ -1,33 +1,17 @@
 const { EmbedBuilder } = require("discord.js");
 const crypto = require("node:crypto");
-const { WebhookClient, PermissionFlagsBits } = require("discord.js");
 const { createCommand } = require("../../websocket/protocol");
-const { WebhookDeliveryQueue } = require("./webhookDeliveryQueue");
-const { redactWebhookUrl } = require("../../utils/security");
-
-const DEFAULT_AVATAR_URL = "https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg";
 
 class ChatRelay {
-  constructor({ discordClient, wsServer, guildRepo, webhookQueue = null, avatars = null }) {
+  constructor({ discordClient, wsServer, guildRepo, avatars = null }) {
     this.avatars = avatars;
     this.client = discordClient;
     this.wsServer = wsServer;
     this.guildRepo = guildRepo;
 
-    // Cache of guildId -> WebhookClient
-    this.webhookClients = new Map();
-
     // Loop prevention: in-memory LRU tracking of recent message IDs
     this.recentMessageIds = new Set();
     this.recentMessageOrder = [];
-
-    // Bounded delivery queue for outbound game -> discord messages
-    this.queue =
-      webhookQueue ||
-      new WebhookDeliveryQueue({
-        maxCapacity: 100,
-        onWebhookInvalid: ({ guildId }) => this.handleWebhookInvalid(guildId),
-      });
   }
 
   isChatChannel(channelId) {
@@ -52,96 +36,6 @@ class ChatRelay {
 
   isRecentMessage(messageId) {
     return Boolean(messageId && this.recentMessageIds.has(messageId));
-  }
-
-  /**
-   * Handles webhook invalidation (e.g. 404 Unknown Webhook if deleted in Discord).
-   * Cleans up client and resets stored URL so next send will re-discover or re-create it.
-   */
-  handleWebhookInvalid(guildId) {
-    const existing = this.webhookClients.get(guildId);
-    if (existing && typeof existing.destroy === "function") {
-      try {
-        existing.destroy();
-      } catch {}
-    }
-    this.webhookClients.delete(guildId);
-
-    try {
-      this.guildRepo.upsertGuildConfig(guildId, { chatWebhookUrl: null });
-      console.log(`[chatRelay] Reset invalid webhook URL for guild ${guildId}`);
-    } catch (err) {
-      console.warn(`[chatRelay] Error resetting webhook config for guild ${guildId}: ${err.message}`);
-    }
-  }
-
-  /**
-   * Retrieves an existing WebhookClient or resolves/creates one for the channel.
-   */
-  async getOrCreateWebhookClient(cfg, guild) {
-    if (!cfg || !cfg.guildId) return null;
-    const guildId = cfg.guildId;
-
-    // 1. Check in-memory cache
-    if (this.webhookClients.has(guildId)) {
-      return this.webhookClients.get(guildId);
-    }
-
-    // 2. Check stored webhook URL
-    if (cfg.chatWebhookUrl) {
-      try {
-        const client = new WebhookClient({ url: cfg.chatWebhookUrl });
-        this.webhookClients.set(guildId, client);
-        return client;
-      } catch (err) {
-        console.warn(`[chatRelay] Failed to instantiate WebhookClient from stored URL: ${redactWebhookUrl(err.message)}`);
-      }
-    }
-
-    // 3. Auto-discover or auto-create if chat channel is set
-    if (!guild || !cfg.chatChannelId) return null;
-
-    try {
-      const channel =
-        guild.channels.cache.get(cfg.chatChannelId) ||
-        (await guild.channels.fetch(cfg.chatChannelId).catch(() => null));
-
-      if (!channel || typeof channel.fetchWebhooks !== "function") return null;
-
-      // Check permissions
-      const me = guild.members?.me || guild.members?.cache?.get(this.client.user?.id);
-      const perms = channel.permissionsFor ? channel.permissionsFor(me) : null;
-      if (perms && !perms.has(PermissionFlagsBits.ManageWebhooks)) {
-        return null;
-      }
-
-      // Check existing webhooks in channel to prevent duplicates
-      const webhooks = await channel.fetchWebhooks();
-      const botUserId = this.client.user?.id;
-      let webhook = webhooks.find(
-        (w) => w.name === "Chat Relay" || (botUserId && w.owner?.id === botUserId)
-      );
-
-      if (!webhook && typeof channel.createWebhook === "function") {
-        const avatarUrl = this.client.user?.displayAvatarURL ? this.client.user.displayAvatarURL() : null;
-        webhook = await channel.createWebhook({
-          name: "Chat Relay",
-          avatar: avatarUrl,
-          reason: "In-game chat relay webhook",
-        });
-      }
-
-      if (webhook && webhook.url) {
-        this.guildRepo.upsertGuildConfig(guildId, { chatWebhookUrl: webhook.url });
-        const client = new WebhookClient({ url: webhook.url });
-        this.webhookClients.set(guildId, client);
-        return client;
-      }
-    } catch (err) {
-      console.warn(`[chatRelay] Auto-discovery of webhook failed for guild ${guildId}: ${redactWebhookUrl(err.message)}`);
-    }
-
-    return null;
   }
 
   /**
@@ -230,7 +124,7 @@ class ChatRelay {
   /**
    * Unturned -> Discord
    * Receives game chat events, disarms pings, applies player name & avatar formatting,
-   * and delivers to Discord via Webhook through the bounded delivery queue.
+   * and posts it to the configured chat channel as an embed.
    * NOTE: Chat message content is NEVER saved to SQLite/MySQL.
    */
   async handleGameChatEvent({ serverId, steamId, playerName, message, mode = "Global", locationName = null, group = null }) {
@@ -258,10 +152,10 @@ class ChatRelay {
           await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
         }
       } catch (err) {
-        console.warn(`[chatRelay] Failed to deliver game chat: ${redactWebhookUrl(err.message)}`);
+        console.warn(`[chatRelay] Failed to deliver game chat: ${err.message}`);
       }
     }
   }
 }
 
-module.exports = { ChatRelay, DEFAULT_AVATAR_URL };
+module.exports = { ChatRelay };

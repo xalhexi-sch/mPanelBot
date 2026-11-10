@@ -48,9 +48,7 @@ async function main() {
   const avatars = new SteamAvatarService();
   const statsService = new StatsService({ statsRepo, mysqlConfig: config.integrations.mysql });
   console.log(`[stats] Player stats source: ${statsService.source}`);
-  const guildRepo = new GuildRepository(dbManager, config.security.encryptionKey, [config.network.apiKey]);
-  const migrated = guildRepo.migrateEncryption();
-  if (migrated > 0) console.log("[security] Re-encrypted " + migrated + " stored secret(s) with the dedicated key.");
+  const guildRepo = new GuildRepository(dbManager);
   const auditRepo = new AuditRepository(dbManager);
   const snapshotRepo = new SnapshotRepository(dbManager);
 

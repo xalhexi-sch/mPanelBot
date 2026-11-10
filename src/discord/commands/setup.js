@@ -18,7 +18,7 @@ function buildSetupCommand() {
           o.setName("raid_channel").setDescription("Channel for raid alerts").addChannelTypes(ChannelType.GuildText)
         )
         .addChannelOption((o) =>
-          o.setName("chat_channel").setDescription("Channel for 2-way chat relay (webhook auto-configured)").addChannelTypes(ChannelType.GuildText)
+          o.setName("chat_channel").setDescription("Channel for the 2-way chat relay").addChannelTypes(ChannelType.GuildText)
         )
         .addChannelOption((o) =>
           o.setName("join_leave_channel").setDescription("Channel for connect/disconnect logs").addChannelTypes(ChannelType.GuildText)
@@ -79,51 +79,17 @@ async function handleSetupInteraction(interaction, { guildRepo, livePanels }) {
     if (cmdLogCh) updates.commandLogChannelId = cmdLogCh.id;
     if (punLogCh) updates.punishmentLogChannelId = punLogCh.id;
 
-    let webhookNote = "";
-    if (chatCh) {
-      updates.chatChannelId = chatCh.id;
+    if (chatCh) updates.chatChannelId = chatCh.id;
 
-      // Check required Discord Manage Webhooks permission
-      const me = interaction.guild?.members?.me || interaction.guild?.members?.cache?.get(interaction.client?.user?.id);
-      const perms = chatCh.permissionsFor ? chatCh.permissionsFor(me) : null;
-      if (perms && !perms.has(PermissionFlagsBits.ManageWebhooks)) {
+    // The bot posts its own messages, so it needs these permissions in every channel it is pointed at
+    const me = interaction.guild?.members?.me;
+    for (const ch of [raidCh, chatCh, joinLeaveCh, cmdLogCh, punLogCh].filter(Boolean)) {
+      const perms = ch.permissionsFor && me ? ch.permissionsFor(me) : null;
+      if (perms && !(perms.has(PermissionFlagsBits.ViewChannel) && perms.has(PermissionFlagsBits.SendMessages) && perms.has(PermissionFlagsBits.EmbedLinks))) {
         return interaction.reply({
-          content: `❌ Missing Permission: The bot requires the **Manage Webhooks** permission in <#${chatCh.id}> to automatically configure chat relay. Please grant this permission and try again.`,
+          content: `❌ I need **View Channel**, **Send Messages** and **Embed Links** in <#${ch.id}>.`,
           ephemeral: true,
         });
-      }
-
-      // Detect and reuse existing webhook, or create one if none exists (prevent duplicates)
-      if (typeof chatCh.fetchWebhooks === "function") {
-        try {
-          const webhooks = await chatCh.fetchWebhooks();
-          const botUserId = interaction.client?.user?.id;
-          let existingWh = null;
-          if (webhooks && typeof webhooks.find === "function") {
-            existingWh = webhooks.find(
-              (w) => w.name === "Chat Relay" || (botUserId && w.owner?.id === botUserId)
-            );
-          }
-
-          if (existingWh) {
-            updates.chatWebhookUrl = existingWh.url;
-            webhookNote = " *(reused existing webhook)*";
-          } else if (typeof chatCh.createWebhook === "function") {
-            const avatarUrl = interaction.client?.user?.displayAvatarURL ? interaction.client.user.displayAvatarURL() : null;
-            const newWh = await chatCh.createWebhook({
-              name: "Chat Relay",
-              avatar: avatarUrl,
-              reason: "In-game chat relay webhook",
-            });
-            updates.chatWebhookUrl = newWh.url;
-            webhookNote = " *(created new webhook)*";
-          }
-        } catch (err) {
-          return interaction.reply({
-            content: `❌ Failed to configure chat webhook in <#${chatCh.id}>: ${err.message}`,
-            ephemeral: true,
-          });
-        }
       }
     }
 
@@ -135,8 +101,7 @@ async function handleSetupInteraction(interaction, { guildRepo, livePanels }) {
     return interaction.reply({
       content: `✅ Guild channels updated successfully!\n` +
         `• Raid Channel: ${saved.raidChannelId ? `<#${saved.raidChannelId}>` : "*Not set*"}\n` +
-        `• Chat Channel: ${saved.chatChannelId ? `<#${saved.chatChannelId}>${webhookNote}` : "*Not set*"}\n` +
-        `• Chat Webhook: ${saved.chatWebhookUrl ? "Configured (automatic)" : "*Not configured*"}\n` +
+        `• Chat Channel: ${saved.chatChannelId ? `<#${saved.chatChannelId}>` : "*Not set*"}\n` +
         `• Join/Leave Channel: ${saved.joinLeaveChannelId ? `<#${saved.joinLeaveChannelId}>` : "*Not set*"}\n` +
         `• Command Log Channel: ${saved.commandLogChannelId ? `<#${saved.commandLogChannelId}>` : "*Not set*"}\n` +
         `• Punishment Log Channel: ${saved.punishmentLogChannelId ? `<#${saved.punishmentLogChannelId}>` : "*Not set*"}`,
@@ -232,7 +197,6 @@ async function handleSetupInteraction(interaction, { guildRepo, livePanels }) {
       .addFields(
         { name: "Raid Channel", value: cfg.raidChannelId ? `<#${cfg.raidChannelId}>` : "*Not configured*", inline: true },
         { name: "Chat Relay Channel", value: cfg.chatChannelId ? `<#${cfg.chatChannelId}>` : "*Not configured*", inline: true },
-        { name: "Chat Webhook", value: cfg.chatWebhookUrl ? "Configured (automatic)" : "*Not configured*", inline: true },
         { name: "Join/Leave Logs", value: cfg.joinLeaveChannelId ? `<#${cfg.joinLeaveChannelId}>` : "*Not configured*", inline: true },
         { name: "Command Logs", value: cfg.commandLogChannelId ? `<#${cfg.commandLogChannelId}>` : "*Not configured*", inline: true },
         { name: "Punishment Logs", value: cfg.punishmentLogChannelId ? `<#${cfg.punishmentLogChannelId}>` : "*Not configured*", inline: true },

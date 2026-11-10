@@ -62,7 +62,7 @@ describe("plugin <-> bot end-to-end contract", () => {
       stats: new StatsRepository(db),
       snapshot: new SnapshotRepository(db),
       audit: new AuditRepository(db),
-      guild: new GuildRepository(db, API_KEY),
+      guild: new GuildRepository(db),
     };
 
     spies = { chat: [], commands: [], punishments: [], connected: [], disconnected: [], dms: [] };

@@ -9,9 +9,6 @@ const WebSocket = require("ws");
 const { AuthThrottle, TokenBucket } = require("../src/websocket/threatGuard");
 const { GameWebSocketServer } = require("../src/websocket/server");
 const { createHealthServer } = require("../src/http/healthServer");
-const { encryptText, decryptText, isEncryptedWith } = require("../src/utils/security");
-const { DatabaseManager } = require("../src/database");
-const { GuildRepository } = require("../src/database/repositories/guildRepository");
 const { loadConfig } = require("../src/config");
 
 const SHARED = "shared-key-0123456789abcdef0123456789";
@@ -162,48 +159,7 @@ describe("WebSocket server hardening", () => {
   });
 });
 
-describe("secret storage", () => {
-  it("has no built-in default key", () => {
-    assert.throws(() => encryptText("https://discord.com/api/webhooks/1/x", null), /encryption secret is required/);
-  });
-
-  it("decrypts with any secret in the list and detects values needing migration", () => {
-    const legacy = encryptText("payload", "old-api-key");
-    assert.strictEqual(decryptText(legacy, ["new-key", "old-api-key"]), "payload");
-    assert.strictEqual(decryptText(legacy, ["new-key"]), null);
-    assert.strictEqual(isEncryptedWith(legacy, "new-key"), false);
-  });
-
-  it("re-encrypts a webhook stored under the API key with the dedicated key, so API key rotation is safe", () => {
-    const db = new DatabaseManager(":memory:");
-    new GuildRepository(db, "api-key-v1").upsertGuildConfig("g", { chatWebhookUrl: "https://discord.com/api/webhooks/1/secret" });
-
-    const repo = new GuildRepository(db, "dedicated-key", ["api-key-v1"]);
-    assert.strictEqual(repo.getGuildConfig("g").chatWebhookUrl, "https://discord.com/api/webhooks/1/secret", "still readable via legacy secret");
-    assert.strictEqual(repo.migrateEncryption(), 1);
-    assert.strictEqual(repo.migrateEncryption(), 0, "idempotent");
-
-    // After rotation of the API key the dedicated key alone is enough
-    const rotated = new GuildRepository(db, "dedicated-key", ["api-key-v2"]);
-    assert.strictEqual(rotated.getGuildConfig("g").chatWebhookUrl, "https://discord.com/api/webhooks/1/secret");
-    db.close();
-  });
-});
-
 describe("config", () => {
-  it("generates a dedicated encryption key once and persists it", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cfg-"));
-    const file = path.join(dir, "config.json");
-    fs.writeFileSync(file, JSON.stringify({ discord: { token: "t".repeat(30) }, network: { apiKey: "k".repeat(40) } }));
-
-    const first = loadConfig(file);
-    assert.match(first.security.encryptionKey, /^[0-9a-f]{64}$/);
-    const second = loadConfig(file);
-    assert.strictEqual(second.security.encryptionKey, first.security.encryptionKey, "stable across restarts");
-    assert.notStrictEqual(first.security.encryptionKey, first.network.apiKey);
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
   it("ignores weak or malformed per-server keys", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cfg-"));
     const file = path.join(dir, "config.json");

@@ -228,5 +228,5 @@ using the exact payload shapes the C# plugin emits (stats, snapshots, logs, raid
 - **Login lockout:** 5 wrong keys within a minute block that address for 5 minutes (`429`). Each connection is also rate-limited (default 40 msg/s sustained, burst 200; `network.messageRatePerSec` / `network.messageBurst`).
 - **Per-server keys (optional):** add `"network": { "serverKeys": { "survival-1": "<24+ char secret>" } }`. A server with its own key can no longer be impersonated with the shared key, and its key cannot speak for any other server.
 - **Health endpoint:** `GET /health` returns only `{"status":"ok"}`. Connected-server details need `Authorization: Bearer <shared key>`.
-- **Stored secrets:** a dedicated `security.encryptionKey` is generated into `config.json` on first start (file mode 0600) and existing secrets are migrated, so rotating the API key never locks the bot out of its own data.
+- **Stored secrets:** none. The bot keeps no webhook URLs or tokens in its database; the only secrets live in `config.json` (kept at mode 0600, with a startup warning if it is ever readable by other users).
 - **Dependencies** are pinned to exact versions; run `npm audit` after updates.

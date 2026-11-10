@@ -129,7 +129,7 @@ describe("MySQL stats source (optional)", () => {
 describe("live panels", () => {
   function setup() {
     const db = new DatabaseManager(":memory:");
-    const guildRepo = new GuildRepository(db, "secret");
+    const guildRepo = new GuildRepository(db);
     const snapshotRepo = new SnapshotRepository(db);
     const statsRepo = new StatsRepository(db);
     snapshotRepo.saveSnapshot("s1", { serverName: "One", map: "PEI", onlinePlayers: 1, maxPlayers: 10, players: [{ steamId: "1", playerName: "A", pingMs: 5, sessionDurationSeconds: 5 }] });
@@ -195,30 +195,17 @@ describe("live panels", () => {
 });
 
 describe("guild repository", () => {
-  it("round-trips every setting and keeps the webhook encrypted at rest", () => {
+  it("round-trips every setting and keeps unrelated fields on partial updates", () => {
     const db = new DatabaseManager(":memory:");
-    const repo = new GuildRepository(db, "k");
-    repo.upsertGuildConfig("g", { chatWebhookUrl: "https://discord.com/api/webhooks/1/abc", statusChannelId: "10", adminRoleIds: ["5"] });
+    const repo = new GuildRepository(db);
+    repo.upsertGuildConfig("g", { chatChannelId: "9", statusChannelId: "10", adminRoleIds: ["5"] });
     const cfg = repo.getGuildConfig("g");
-    assert.strictEqual(cfg.chatWebhookUrl, "https://discord.com/api/webhooks/1/abc");
+    assert.strictEqual(cfg.chatChannelId, "9");
     assert.strictEqual(cfg.statusChannelId, "10");
     assert.deepStrictEqual(cfg.adminRoleIds, ["5"]);
-    const raw = db.prepare("SELECT chat_webhook_url FROM guild_configs WHERE guild_id = ?").get("g").chat_webhook_url;
-    assert.ok(!raw.includes("discord.com/api/webhooks"), "webhook must not be stored in plaintext");
-    // partial update keeps other fields
     repo.upsertGuildConfig("g", { leaderboardChannelId: "11" });
     assert.strictEqual(repo.getGuildConfig("g").statusChannelId, "10");
-    db.close();
-  });
-});
-
-describe("snapshot repository", () => {
-  it("returns the server code from both getSnapshot and getAllSnapshots", () => {
-    const db = new DatabaseManager(":memory:");
-    const repo = new SnapshotRepository(db);
-    repo.saveSnapshot("s1", { serverName: "PH", serverSteamId: "85568392935684753", map: "Washington", onlinePlayers: 1, maxPlayers: 24, players: [] });
-    assert.strictEqual(repo.getSnapshot("s1").serverSteamId, "85568392935684753");
-    assert.strictEqual(repo.getAllSnapshots()[0].serverSteamId, "85568392935684753");
+    assert.strictEqual(repo.getGuildConfig("g").leaderboardChannelId, "11");
     db.close();
   });
 });

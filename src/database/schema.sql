@@ -17,7 +17,6 @@ CREATE TABLE IF NOT EXISTS guild_configs (
     guild_id TEXT PRIMARY KEY,
     raid_channel_id TEXT,
     chat_channel_id TEXT,
-    chat_webhook_url TEXT,
     join_leave_channel_id TEXT,
     command_log_channel_id TEXT,
     punishment_log_channel_id TEXT,

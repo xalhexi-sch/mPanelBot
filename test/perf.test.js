@@ -73,7 +73,7 @@ describe("stats cache (idle load)", () => {
 describe("guild config cache", () => {
   it("reads the database once, invalidates on upsert, and cannot be corrupted by callers", () => {
     const db = new DatabaseManager(":memory:");
-    const repo = new GuildRepository(db, "secret");
+    const repo = new GuildRepository(db);
     repo.upsertGuildConfig("g1", { chatChannelId: "1" });
 
     let selects = 0;

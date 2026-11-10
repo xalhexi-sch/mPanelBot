@@ -32,7 +32,6 @@ class DatabaseManager {
     try {
       const have = new Set(this.db.prepare("PRAGMA table_info(guild_configs);").all().map((c) => c.name));
       for (const col of [
-        "chat_webhook_url",
         "status_channel_id",
         "status_message_id",
         "leaderboard_channel_id",
@@ -44,6 +43,15 @@ class DatabaseManager {
     try {
       const cols = this.db.prepare("PRAGMA table_info(server_snapshots);").all().map((c) => c.name);
       if (cols.length > 0 && !cols.includes("server_steam_id")) this.db.exec("ALTER TABLE server_snapshots ADD COLUMN server_steam_id TEXT;");
+    } catch {}
+    this.dropLegacyWebhookColumn();
+  }
+
+  /** Older databases stored a chat webhook URL (a credential). It is no longer used, so drop the column and its data. */
+  dropLegacyWebhookColumn() {
+    try {
+      const has = this.db.prepare("PRAGMA table_info(guild_configs);").all().some((c) => c.name === "chat_webhook_url");
+      if (has) this.db.exec("ALTER TABLE guild_configs DROP COLUMN chat_webhook_url;");
     } catch {}
   }
 
