@@ -327,14 +327,102 @@ describe("group field", () => {
     assert.strictEqual(await l._formatGroup({ kind: "ingame", id: "5" }), "None");
   });
 
-  it("when Steam is unreachable a real Steam group id still links to its gid page", async () => {
+  it("when Steam is unreachable the group stays a link (to its page) marked as pending, never a generic label", async () => {
     const l = logger(async () => null);
-    assert.strictEqual(await l._formatGroup({ kind: "steam", id: STEAM_GID }), `[Steam Group](https://steamcommunity.com/gid/${STEAM_GID})`);
-    assert.strictEqual(await l._formatGroup({ kind: "steam", id: "12345" }), "None", "unknown id types are not linked");
+    const r = await l._formatGroupDetailed({ kind: "steam", id: STEAM_GID });
+    assert.strictEqual(r.text, `[Fetching name…](https://steamcommunity.com/gid/${STEAM_GID})`);
+    assert.strictEqual(r.pending, true);
+    assert.doesNotMatch(r.text, /Steam Group/);
+    assert.deepStrictEqual(await l._formatGroupDetailed({ kind: "steam", id: "12345" }), { text: "None", pending: false }, "unknown id types are not linked");
   });
 
   it("markdown in a group name cannot break out of the link", async () => {
     const l = logger(async () => ({ name: "[click](https://evil)", url: "https://steamcommunity.com/groups/x" }));
     assert.strictEqual(await l._formatGroup({ kind: "steam", id: STEAM_GID }), "[clickhttps://evil](https://steamcommunity.com/groups/x)");
+  });
+});
+
+describe("group name resilience (Steam rate limits)", () => {
+  const { SteamAvatarService } = require("../src/services/steamAvatar");
+  const { SteamGroupRepository } = require("../src/database/repositories/steamGroupRepository");
+  const { DiscordLogger } = require("../src/discord/logs/discordLogger");
+  const GID = "103582791475043382";
+  const GROUP_XML = "<memberList><groupDetails><groupName><![CDATA[!UTD!]]></groupName><groupURL><![CDATA[UTDONTOP]]></groupURL></groupDetails></memberList>";
+  const res = (status, body = "", headers = {}) => ({ status, ok: status >= 200 && status < 300, text: async () => body, headers: { get: (k) => headers[k.toLowerCase()] ?? null } });
+  const noSleep = async () => {};
+
+  it("a 429 pauses every Steam lookup until Retry-After, without sending more requests", async () => {
+    let t = 0, calls = 0;
+    const svc = new SteamAvatarService({ now: () => t, sleep: noSleep, minGapMs: 0, fetchImpl: async () => (calls++, res(429, "", { "retry-after": "120" })) });
+    assert.strictEqual(await svc.getGroup(GID), null);
+    assert.strictEqual(calls, 1);
+    assert.ok(svc.blockedForMs > 100_000);
+    await svc.getProfile("76561199246661188");
+    await svc.getGroup("103582791475043383");
+    assert.strictEqual(calls, 1, "no requests while blocked");
+    t += 121_000;
+    assert.strictEqual(svc.blockedForMs, 0);
+  });
+
+  it("spaces requests out so a join does not burst Steam", async () => {
+    let t = 1000;
+    const waits = [];
+    const svc = new SteamAvatarService({
+      now: () => t, minGapMs: 1200,
+      sleep: async (ms) => { waits.push(ms); t += ms; },
+      fetchImpl: async () => res(200, "<profile><avatarFull>https://cdn/a.jpg</avatarFull></profile>"),
+    });
+    await svc.getProfile("76561199246661188");
+    await svc.getProfile("76561199246661189");
+    assert.ok(waits.some((w) => w > 0 && w <= 1200), "second request waited out the gap");
+  });
+
+  it("persists a fetched group name and keeps serving it when Steam later fails", async () => {
+    const db = new DatabaseManager(":memory:");
+    const store = new SteamGroupRepository(db);
+    const first = new SteamAvatarService({ sleep: noSleep, minGapMs: 0, groupStore: store, fetchImpl: async () => res(200, GROUP_XML) });
+    assert.deepStrictEqual(await first.getGroup(GID), { name: "!UTD!", url: "https://steamcommunity.com/groups/UTDONTOP" });
+
+    // brand-new process (empty memory cache) while Steam is rate-limiting
+    let calls = 0;
+    const second = new SteamAvatarService({ sleep: noSleep, minGapMs: 0, groupStore: store, fetchImpl: async () => (calls++, res(429)) });
+    assert.deepStrictEqual(await second.getGroup(GID), { name: "!UTD!", url: "https://steamcommunity.com/groups/UTDONTOP" });
+    assert.strictEqual(calls, 0, "fresh stored name needs no network call");
+    db.close();
+  });
+
+  it("a stale stored name is still used if the refresh fails", async () => {
+    const db = new DatabaseManager(":memory:");
+    const store = new SteamGroupRepository(db);
+    store.set(GID, { name: "Old Name", url: "https://steamcommunity.com/groups/old" });
+    db.prepare("UPDATE steam_groups SET fetched_at_utc = ?").run(new Date(Date.now() - 30 * 86400_000).toISOString());
+    const svc = new SteamAvatarService({ sleep: noSleep, minGapMs: 0, groupStore: store, fetchImpl: async () => res(429) });
+    assert.strictEqual((await svc.getGroup(GID)).name, "Old Name");
+    db.close();
+  });
+
+  it("join card shows a placeholder first, then edits the message with the real group name", async () => {
+    const sent = [];
+    const edits = [];
+    const message = { edit: async (p) => edits.push(p) };
+    const channel = { isTextBased: () => true, send: async (p) => (sent.push(p), message) };
+    let steamUp = false;
+    const logger = new DiscordLogger({
+      discordClient: { guilds: { cache: new Map([["g", { channels: { cache: new Map([["c", channel]]) } }]]) } },
+      guildRepo: { getAllGuildConfigs: () => [{ guildId: "g", joinLeaveChannelId: "c" }] },
+      avatars: { getProfile: async () => ({}), getGroup: async () => (steamUp ? { name: "!UTD!", url: "https://steamcommunity.com/groups/UTDONTOP" } : null) },
+      groupWaitMs: 0,
+      groupRetryDelaysMs: [5, 5, 5],
+    });
+
+    await logger.logPlayerConnected({ serverId: "s", steamId: "76561199246661188", playerName: "ec", group: { kind: "steam", id: GID } });
+    const firstField = Object.fromEntries(sent[0].embeds[0].toJSON().fields.map((f) => [f.name, f.value]));
+    assert.match(firstField.Group, /Fetching name/);
+
+    steamUp = true;
+    await new Promise((r) => setTimeout(r, 40));
+    assert.strictEqual(edits.length, 1, "message edited exactly once");
+    const editedField = Object.fromEntries(edits[0].embeds[0].toJSON().fields.map((f) => [f.name, f.value]));
+    assert.strictEqual(editedField.Group, "[!UTD!](https://steamcommunity.com/groups/UTDONTOP)");
   });
 });

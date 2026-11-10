@@ -53,7 +53,8 @@ function looksLikeSteamGroupId(id) {
 const cleanLabel = (name) => String(name || "").replace(/[\[\]()*_`~|>]/g, "").trim().slice(0, 64);
 
 class DiscordLogger {
-  constructor({ discordClient, guildRepo, avatars = null, snapshotRepo = null, linkRepo = null, groupWaitMs = 6000 } = {}) {
+  constructor({ discordClient, guildRepo, avatars = null, snapshotRepo = null, linkRepo = null, groupWaitMs = 6000, groupRetryDelaysMs = [20_000, 90_000, 300_000] } = {}) {
+    this.groupRetryDelaysMs = groupRetryDelaysMs;
     this.groupWaitMs = groupWaitMs;
     this.linkRepo = linkRepo;
     this.client = discordClient;
@@ -104,11 +105,12 @@ class DiscordLogger {
   }
 
   async _broadcastToChannel(channelKey, embed) {
+    const sent = [];
     if (!this.guildRepo || typeof this.guildRepo.getAllGuildConfigs !== "function") {
-      return;
+      return sent;
     }
     if (!this.client) {
-      return;
+      return sent;
     }
 
     let configs = [];
@@ -116,7 +118,7 @@ class DiscordLogger {
       configs = this.guildRepo.getAllGuildConfigs() || [];
     } catch (err) {
       console.warn(`[discordLogger] Failed to query guild configs: ${err.message}`);
-      return;
+      return sent;
     }
 
     for (const cfg of configs) {
@@ -150,14 +152,17 @@ class DiscordLogger {
         }
 
         if (typeof channel.send === "function") {
-          await channel.send({ embeds: [embed] }).catch((err) => {
+          const message = await channel.send({ embeds: [embed] }).catch((err) => {
             console.warn(`[discordLogger] Failed to send embed to channel ${channelId} in guild ${cfg.guildId}: ${err.message}`);
+            return null;
           });
+          if (message) sent.push(message);
         }
       } catch (err) {
         console.warn(`[discordLogger] Error delivering log to channel ${channelId}: ${err.message}`);
       }
     }
+    return sent;
   }
 
   /**
@@ -165,9 +170,14 @@ class DiscordLogger {
    * identify as a Steam group) is just its name, and "None" when there is nothing to show.
    */
   async _formatGroup(group) {
+    return (await this._formatGroupDetailed(group)).text;
+  }
+
+  /** @returns {{text:string, pending:boolean}} pending = a Steam group whose name could not be fetched yet */
+  async _formatGroupDetailed(group) {
     const isSteam = String(group.kind || "").toLowerCase() !== "ingame";
     let name = cleanLabel(group.name);
-    if (!isSteam) return name || "None";
+    if (!isSteam) return { text: name || "None", pending: false };
 
     let url = group.url || null;
     if (this.avatars && group.id && (!name || name === String(group.id))) {
@@ -179,24 +189,26 @@ class DiscordLogger {
     }
     if (!url && group.id && looksLikeSteamGroupId(group.id)) url = `https://steamcommunity.com/gid/${group.id}`;
 
-    if (name && name !== String(group.id)) return url ? `[${name}](${url})` : name;
-    return url ? `[Steam Group](${url})` : "None";
+    if (name && name !== String(group.id)) return { text: url ? `[${name}](${url})` : name, pending: false };
+    // Name unknown for now (Steam rate-limited/unreachable). Show a placeholder; it is replaced by the real name shortly.
+    return url ? { text: `[Fetching name…](${url})`, pending: true } : { text: "None", pending: false };
   }
 
   /** Old Blood Horizon "Player Joined / Player Left" card: avatar thumbnail, Discord link, Steam group, account age. */
-  async _joinLeaveEmbed(kind, data) {
+  async _joinLeaveEmbed(kind, data, isRetry = false) {
     const { serverId, steamId, playerName, group } = data;
     const profile = this.avatars && steamId ? await this.avatars.getProfile(steamId) : { avatarUrl: null, createdUnix: null };
 
     // Group: plugin sends {kind,id,name,url}; resolve a nicer Steam group name when we only have the gid
     let groupText = "None";
+    let pending = false;
     let g0 = group && (group.name || group.id) ? group : null;
     if (!g0 && steamId) {
       // The join event has no group; the status snapshot may need a few seconds to include a brand-new player
-      const gid = await this._groupIdFor(steamId, kind === "join" ? this.groupWaitMs : 0);
+      const gid = await this._groupIdFor(steamId, kind === "join" && !isRetry ? this.groupWaitMs : 0);
       if (gid && gid !== "0") g0 = { kind: "steam", id: gid };
     }
-    if (g0) groupText = await this._formatGroup(g0);
+    if (g0) ({ text: groupText, pending } = await this._formatGroupDetailed(g0));
 
     let discordText = "Unlinked";
     try {
@@ -221,12 +233,35 @@ class DiscordLogger {
           : { name: "Session Time", value: duration != null ? formatDuration(duration) : "Unknown", inline: true }
       );
     if (profile.avatarUrl) embed.setThumbnail(profile.avatarUrl);
-    return embed;
+    return { embed, pending };
+  }
+
+  /** Send a join/leave card; if the group name is still unknown, edit the message once Steam answers. */
+  async _sendJoinLeave(kind, data) {
+    const { embed, pending } = await this._joinLeaveEmbed(kind, data);
+    const messages = await this._broadcastToChannel("joinLeaveChannelId", embed);
+    if (pending && messages.length) this._scheduleGroupRetry(kind, data, messages, 0);
+  }
+
+  _scheduleGroupRetry(kind, data, messages, attempt) {
+    const delay = this.groupRetryDelaysMs[attempt];
+    if (delay === undefined) return;
+    const timer = setTimeout(async () => {
+      try {
+        const { embed, pending } = await this._joinLeaveEmbed(kind, { ...data, group: data.group }, true);
+        if (!pending) {
+          await Promise.all(messages.map((m) => m.edit({ embeds: [embed] }).catch(() => {})));
+        } else {
+          this._scheduleGroupRetry(kind, data, messages, attempt + 1);
+        }
+      } catch {}
+    }, delay);
+    timer.unref?.();
   }
 
   async logPlayerConnected(data = {}) {
     try {
-      await this._broadcastToChannel("joinLeaveChannelId", await this._joinLeaveEmbed("join", data || {}));
+      await this._sendJoinLeave("join", data || {});
     } catch (err) {
       console.warn(`[discordLogger] Unexpected error in logPlayerConnected: ${err.message}`);
     }
@@ -234,7 +269,7 @@ class DiscordLogger {
 
   async logPlayerDisconnected(data = {}) {
     try {
-      await this._broadcastToChannel("joinLeaveChannelId", await this._joinLeaveEmbed("leave", data || {}));
+      await this._sendJoinLeave("leave", data || {});
     } catch (err) {
       console.warn(`[discordLogger] Unexpected error in logPlayerDisconnected: ${err.message}`);
     }

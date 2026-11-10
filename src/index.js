@@ -5,6 +5,7 @@ const { DedupeRepository } = require("./database/repositories/dedupeRepository")
 const { StatsRepository } = require("./database/repositories/statsRepository");
 const { StatsService } = require("./services/statsService");
 const { SteamAvatarService } = require("./services/steamAvatar");
+const { SteamGroupRepository } = require("./database/repositories/steamGroupRepository");
 const { LivePanels } = require("./discord/livePanels");
 const { GuildRepository } = require("./database/repositories/guildRepository");
 const { AuditRepository } = require("./database/repositories/auditRepository");
@@ -45,7 +46,7 @@ async function main() {
   const linkRepo = new LinkRepository(dbManager);
   const dedupeRepo = new DedupeRepository(dbManager);
   const statsRepo = new StatsRepository(dbManager);
-  const avatars = new SteamAvatarService();
+  const avatars = new SteamAvatarService({ groupStore: new SteamGroupRepository(dbManager) });
   const statsService = new StatsService({ statsRepo, mysqlConfig: config.integrations.mysql });
   console.log(`[stats] Player stats source: ${statsService.source}`);
   const guildRepo = new GuildRepository(dbManager);

@@ -100,3 +100,11 @@ CREATE INDEX IF NOT EXISTS idx_player_stats_playtime ON player_stats(playtime_se
 CREATE INDEX IF NOT EXISTS idx_player_stats_deaths ON player_stats(deaths DESC);
 CREATE INDEX IF NOT EXISTS idx_link_codes_expires ON link_codes(expires_at_utc);
 CREATE INDEX IF NOT EXISTS idx_processed_events_processed_at ON processed_events(processed_at_utc);
+
+-- Steam group names (looked up from Steam Community and cached to survive rate limits / outages)
+CREATE TABLE IF NOT EXISTS steam_groups (
+    group_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT,
+    fetched_at_utc TEXT NOT NULL
+);
