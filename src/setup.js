@@ -53,6 +53,10 @@ async function runSetup() {
     const portStr = await prompt(rl, "Enter WebSocket/API bind port", String(defaultPort));
     const port = parseInt(portStr, 10) || 28600;
 
+    const defaultGuilds = (existingConfig?.discord?.guildIds || []).join(",");
+    const guildsRaw = await prompt(rl, "Your Discord server (guild) ID(s), comma separated (recommended: locks the bot to your server)", defaultGuilds);
+    const guildIds = guildsRaw.split(",").map((s) => s.trim()).filter((s) => /^\d{5,25}$/.test(s));
+
     let apiKey = existingConfig?.network?.apiKey;
     let isNewKey = false;
     if (!apiKey || apiKey.startsWith("PASTE_") || apiKey.startsWith("GENERATED_")) {
@@ -60,32 +64,27 @@ async function runSetup() {
       isNewKey = true;
     }
 
+    // Merge over the existing file so re-running setup never erases serverKeys, MySQL/Pterodactyl settings or tuning.
     const config = {
-      discord: {
-        token: token.trim(),
-        clientId: clientId.trim() || null,
-      },
+      ...existingConfig,
+      discord: { ...(existingConfig.discord || {}), token: token.trim(), clientId: clientId.trim() || null, guildIds },
       network: {
+        heartbeatIntervalMs: 30000,
+        maxPayloadSizeBytes: 262144,
+        ...(existingConfig.network || {}),
         bindAddress: existingConfig?.network?.bindAddress || "0.0.0.0",
         port,
         apiKey,
-        heartbeatIntervalMs: 30000,
-        maxPayloadSizeBytes: 262144,
       },
-      storage: {
-        sqlitePath: existingConfig?.storage?.sqlitePath || "./data/mpanel.sqlite",
-      },
+      storage: { sqlitePath: existingConfig?.storage?.sqlitePath || "./data/mpanel.sqlite" },
       integrations: {
-        pterodactyl: {
-          enabled: false,
-          panelUrl: "",
-          clientApiToken: "",
-          serverIdentifier: "",
-        },
+        pterodactyl: { enabled: false, panelUrl: "", clientApiToken: "", serverIdentifier: "" },
+        ...(existingConfig.integrations || {}),
       },
     };
 
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+    // Owner-only file: it holds the bot token and API key.
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { encoding: "utf8", mode: 0o600 });
     console.log(`\n✅ Configuration successfully saved to: ${configPath}`);
 
     if (isNewKey) {

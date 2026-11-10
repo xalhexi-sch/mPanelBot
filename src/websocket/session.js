@@ -2,6 +2,8 @@ const EventEmitter = require("node:events");
 const { createEnvelope } = require("./protocol");
 
 const MAX_OUTBOUND_QUEUE_SIZE = 500;
+// If the socket itself is buffering this much unsent data the peer is not reading; drop it instead of growing memory.
+const MAX_SOCKET_BUFFER_BYTES = 8 * 1024 * 1024;
 
 class Session extends EventEmitter {
   constructor({ ws, serverId, remoteAddress, pluginVersion = "unknown", serverName = "unknown" }) {
@@ -61,6 +63,12 @@ class Session extends EventEmitter {
     this.isFlushing = true;
 
     while (this.outboundQueue.length > 0) {
+      if (this.ws.bufferedAmount > MAX_SOCKET_BUFFER_BYTES) {
+        this.isFlushing = false;
+        this.emit("queue_dropped", { serverId: this.serverId, slowConsumer: true });
+        this.close(1013, "Slow consumer");
+        return;
+      }
       const msg = this.outboundQueue.shift();
       try {
         this.ws.send(msg);
@@ -138,4 +146,4 @@ class Session extends EventEmitter {
   }
 }
 
-module.exports = { Session, MAX_OUTBOUND_QUEUE_SIZE };
+module.exports = { Session, MAX_OUTBOUND_QUEUE_SIZE, MAX_SOCKET_BUFFER_BYTES };

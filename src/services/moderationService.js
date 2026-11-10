@@ -3,7 +3,9 @@ const { createCommand } = require("../websocket/protocol");
 const { buildModerationCommand, validateConsoleCommand } = require("./commandPolicy");
 
 class ModerationService {
-  constructor({ wsServer, pterodactylClient, auditRepo }) {
+  constructor({ wsServer, pterodactylClient, auditRepo, listKnownServerIds = null, pterodactylServerId = null }) {
+    this.listKnownServerIds = listKnownServerIds;
+    this.pterodactylServerId = pterodactylServerId;
     this.wsServer = wsServer;
     this.pterodactylClient = pterodactylClient;
     this.auditRepo = auditRepo;
@@ -74,16 +76,25 @@ class ModerationService {
   }) {
     const correlationId = crypto.randomUUID();
 
+    // Never guess the target: with several servers in the network a command without a server could land on the
+    // wrong one (e.g. `shutdown`). The target is implicit only when exactly one server exists.
+    if (!serverId) {
+      const known = new Set([
+        ...this.wsServer.getActiveSessions().map((s) => s.serverId),
+        ...(this.listKnownServerIds ? this.listKnownServerIds() : []),
+      ]);
+      if (known.size > 1) {
+        throw new Error(`Several servers are known (${[...known].slice(0, 10).join(", ")}). Specify which one with the \`server\` option.`);
+      }
+    }
+
     // 1. Try WebSocket connection
     let session = null;
     if (serverId) {
       session = this.wsServer.getSession(serverId);
     } else {
-      // Pick first active session if none specified
       const active = this.wsServer.getActiveSessions();
-      if (active.length > 0) {
-        session = active[0];
-      }
+      if (active.length > 0) session = active[0];
     }
 
     if (session && !session.isClosed) {
@@ -144,8 +155,14 @@ class ModerationService {
       }
     }
 
-    // 2. Fallback to Pterodactyl if enabled and configured
-    if (this.pterodactylClient && this.pterodactylClient.isConfigured()) {
+    // 2. Fallback to Pterodactyl if enabled and configured. The panel client is bound to ONE game server, so it may
+    // only stand in for that server; otherwise a command meant for an offline server would run on a different one.
+    const pteroTargetOk =
+      !serverId ||
+      (this.pterodactylServerId
+        ? serverId === this.pterodactylServerId
+        : !this.listKnownServerIds || this.listKnownServerIds().filter((id) => id !== serverId).length === 0);
+    if (this.pterodactylClient && this.pterodactylClient.isConfigured() && pteroTargetOk) {
       try {
         const pteroRes = await this.pterodactylClient.sendCommand(fullCommand);
         this.auditRepo.recordAudit({

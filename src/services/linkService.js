@@ -1,7 +1,33 @@
 class LinkService {
-  constructor({ linkRepo, onLinkCompleted = null }) {
+  constructor({ linkRepo, onLinkCompleted = null, maxBadAttempts = 5, lockoutMs = 10 * 60_000, now = Date.now }) {
     this.linkRepo = linkRepo;
     this.onLinkCompleted = onLinkCompleted;
+    this.maxBadAttempts = maxBadAttempts;
+    this.lockoutMs = lockoutMs;
+    this.now = now;
+    this.attempts = new Map(); // discordId -> { bad, firstAt, lockedUntil }
+  }
+
+  _lockedFor(discordId) {
+    const e = this.attempts.get(discordId);
+    if (!e || !e.lockedUntil) return 0;
+    const left = e.lockedUntil - this.now();
+    if (left <= 0) {
+      this.attempts.delete(discordId);
+      return 0;
+    }
+    return left;
+  }
+
+  _recordBad(discordId) {
+    const t = this.now();
+    let e = this.attempts.get(discordId);
+    if (!e || t - e.firstAt > this.lockoutMs) e = { bad: 0, firstAt: t, lockedUntil: 0 };
+    e.bad++;
+    if (e.bad >= this.maxBadAttempts) e.lockedUntil = t + this.lockoutMs;
+    this.attempts.delete(discordId);
+    this.attempts.set(discordId, e);
+    while (this.attempts.size > 5000) this.attempts.delete(this.attempts.keys().next().value);
   }
 
   handleLinkRequestedEvent({ code, steamId, playerName, serverId, ttlSeconds = 600 }) {
@@ -19,6 +45,12 @@ class LinkService {
       return { success: false, error: "Please provide a valid link code." };
     }
 
+    // Brute-force guard: a handful of wrong codes locks this Discord user out for a while.
+    const lockedMs = this._lockedFor(cleanDiscordId);
+    if (lockedMs > 0) {
+      return { success: false, error: `Too many invalid codes. Try again in ${Math.ceil(lockedMs / 60000)} minute(s).` };
+    }
+
     // Check if Discord user is already linked
     const existingLink = this.linkRepo.getLinkByDiscord(cleanDiscordId);
     if (existingLink) {
@@ -31,6 +63,7 @@ class LinkService {
     // Consume code (atomic transaction, check expiration)
     const codeRecord = this.linkRepo.consumeCode(cleanCode);
     if (!codeRecord) {
+      this._recordBad(cleanDiscordId);
       return {
         success: false,
         error: "Invalid or expired link code. Please generate a new code in-game with `/link`.",
@@ -45,6 +78,8 @@ class LinkService {
         error: `This Steam account (\`${codeRecord.steamId}\`) is already linked to Discord user <@${existingSteam.discord_id}>.`,
       };
     }
+
+    this.attempts.delete(cleanDiscordId);
 
     // Save link in database
     const linkResult = this.linkRepo.linkAccount(codeRecord.steamId, cleanDiscordId);

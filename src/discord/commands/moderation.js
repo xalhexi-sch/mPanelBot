@@ -1,4 +1,15 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
+const { SlashCommandBuilder, PermissionFlagsBits, InteractionContextType } = require("discord.js");
+
+/**
+ * Hides a command from non-admins and from DMs. This is UX/defense-in-depth only: `isAuthorizedAdmin` remains the
+ * real check. Members who rely on a configured admin role can be re-granted visibility under Server Settings >
+ * Integrations > mPanel.
+ */
+function adminOnly(builder) {
+  return builder
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setContexts(InteractionContextType.Guild);
+}
 
 function isAuthorizedAdmin(interaction, guildRepo) {
   if (!interaction.member) return false;
@@ -14,7 +25,7 @@ function isAuthorizedAdmin(interaction, guildRepo) {
 }
 
 function buildBanCommand() {
-  return new SlashCommandBuilder()
+  return adminOnly(new SlashCommandBuilder())
     .setName("ban")
     .setDescription("Ban a player from the Unturned server by Steam64")
     .addStringOption((o) =>
@@ -26,7 +37,7 @@ function buildBanCommand() {
 }
 
 function buildMuteCommand() {
-  return new SlashCommandBuilder()
+  return adminOnly(new SlashCommandBuilder())
     .setName("mute")
     .setDescription("Mute a player on the Unturned server by Steam64")
     .addStringOption((o) =>
@@ -38,7 +49,7 @@ function buildMuteCommand() {
 }
 
 function buildWarnCommand() {
-  return new SlashCommandBuilder()
+  return adminOnly(new SlashCommandBuilder())
     .setName("warn")
     .setDescription("Issue a formal warning to a player by Steam64")
     .addStringOption((o) =>
@@ -49,7 +60,7 @@ function buildWarnCommand() {
 }
 
 function buildKickCommand() {
-  return new SlashCommandBuilder()
+  return adminOnly(new SlashCommandBuilder())
     .setName("kick")
     .setDescription("Kick a player from the Unturned server by Steam64")
     .addStringOption((o) =>
@@ -60,7 +71,7 @@ function buildKickCommand() {
 }
 
 function buildUnbanCommand() {
-  return new SlashCommandBuilder()
+  return adminOnly(new SlashCommandBuilder())
     .setName("unban")
     .setDescription("Unban a player by Steam64")
     .addStringOption((o) =>
@@ -70,7 +81,7 @@ function buildUnbanCommand() {
 }
 
 function buildUnmuteCommand() {
-  return new SlashCommandBuilder()
+  return adminOnly(new SlashCommandBuilder())
     .setName("unmute")
     .setDescription("Unmute a player by Steam64")
     .addStringOption((o) =>
@@ -121,6 +132,7 @@ async function handleModerationInteraction(interaction, { moderationService, gui
 }
 
 module.exports = {
+  adminOnly,
   isAuthorizedAdmin,
   buildBanCommand,
   buildMuteCommand,

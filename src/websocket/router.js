@@ -1,5 +1,27 @@
 const { createAck } = require("./protocol");
 
+const STEAM_ID = /^\d{17}$/;
+const MAX_SESSION_BACKLOG = 1000;
+// Events that overwrite state and are safe to replay; they skip the dedupe table (saves a write per snapshot).
+const IDEMPOTENT_EVENTS = new Set(["server.snapshot"]);
+
+const clampText = (v, max = 64) => (typeof v === "string" ? v.slice(0, max) : v == null ? v : String(v).slice(0, max));
+const validSteam = (v) => typeof v === "string" && STEAM_ID.test(v);
+
+/** Drops malformed Steam IDs and bounds free-text fields so a faulty or hostile game server cannot pollute the DB. */
+function normalizePayload(type, p) {
+  const out = { ...p };
+  for (const k of ["steamId", "killerSteamId", "victimSteamId"]) {
+    if (out[k] != null && !validSteam(String(out[k]))) out[k] = null;
+    else if (out[k] != null) out[k] = String(out[k]);
+  }
+  for (const k of ["playerName", "killerName", "victimName"]) if (k in out) out[k] = clampText(out[k], 64);
+  if ("durationSeconds" in out) out.durationSeconds = Math.min(Math.max(0, Math.trunc(Number(out.durationSeconds)) || 0), 30 * 86400);
+  if ("ttlSeconds" in out) out.ttlSeconds = Math.min(Math.max(30, Math.trunc(Number(out.ttlSeconds)) || 600), 900);
+  if ("code" in out) out.code = clampText(String(out.code ?? ""), 16);
+  return out;
+}
+
 class MessageRouter {
   constructor({
     dedupeRepo,
@@ -21,35 +43,52 @@ class MessageRouter {
     this.discordClient = discordClient;
   }
 
-  async handleEnvelope(session, envelope) {
-    if (!envelope || envelope.kind !== "event") {
-      return;
+  /**
+   * Queues the envelope behind earlier ones from the same session, so events are applied in the order the game sent
+   * them (chat order, join-before-leave) even though handling awaits Discord I/O. The backlog is bounded; when it is
+   * full the event is left un-acked and the plugin's durable outbox retransmits it later.
+   */
+  handleEnvelope(session, envelope) {
+    if (!envelope || envelope.kind !== "event") return Promise.resolve();
+    session._routerBacklog = (session._routerBacklog || 0) + 1;
+    if (session._routerBacklog > MAX_SESSION_BACKLOG) {
+      session._routerBacklog--;
+      return Promise.resolve();
     }
+    const run = () => this._handle(session, envelope).finally(() => { session._routerBacklog--; });
+    const next = (session._routerChain || Promise.resolve()).then(run, run);
+    session._routerChain = next.catch(() => {});
+    return next;
+  }
 
-    const { serverId, id, type, payload } = envelope;
+  async _handle(session, envelope) {
+    // The authenticated session is the only source of truth for who sent this; envelope.serverId is untrusted input.
+    const serverId = session.serverId;
+    const { id, type } = envelope;
+    const payload = normalizePayload(type, envelope.payload && typeof envelope.payload === "object" ? envelope.payload : {});
+    const idempotent = IDEMPOTENT_EVENTS.has(type);
 
-    // 1. Deduplication check (serverId, id)
-    if (this.dedupeRepo.isEventProcessed(serverId, id)) {
-      // Idempotent: already handled, reply with ACK immediately
-      session.send(createAck(envelope, "duplicate"));
-      return;
-    }
-
-    // 2. Dispatch by event type
     try {
-      await this.processEvent(serverId, type, payload || {});
-      // Persist in deduplication store
-      this.dedupeRepo.markEventProcessed(serverId, id, type);
-      // Send positive ACK
+      // Claim-first dedupe: the INSERT is the atomic check, so a retransmit that arrives while Discord I/O is still
+      // pending is refused instead of being processed (and counted) twice.
+      if (!idempotent && !this.dedupeRepo.markEventProcessed(serverId, id, type)) {
+        session.send(createAck(envelope, "duplicate"));
+        return;
+      }
+      try {
+        await this.processEvent(session, serverId, type, payload);
+      } catch (err) {
+        if (!idempotent) this.dedupeRepo.releaseEvent(serverId, id); // allow a retry
+        throw err;
+      }
       session.send(createAck(envelope, "persisted"));
     } catch (err) {
-      console.error(`[router] Error processing event ${type} from ${serverId}:`, err);
-      // Still send ACK with failed status so sender knows it was received
+      console.error(`[router] Error processing event ${type} from ${serverId}: ${err.message}`);
       session.send(createAck(envelope, "error"));
     }
   }
 
-  async processEvent(serverId, type, payload) {
+  async processEvent(session, serverId, type, payload) {
     switch (type) {
       case "server.snapshot":
         if (!payload.serverName && !this._warnedEmptySnapshot) {

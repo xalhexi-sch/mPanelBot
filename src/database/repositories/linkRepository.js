@@ -7,6 +7,9 @@ class LinkRepository {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
 
+    // One pending code per player: a new /link replaces the old one, so a flood of requests cannot fill the table.
+    this.dbManager.prepare("DELETE FROM link_codes WHERE steam_id = ?").run(String(steamId).trim());
+
     const stmt = this.dbManager.prepare(`
       INSERT OR REPLACE INTO link_codes (code, steam_id, player_name, server_id, expires_at_utc, created_at_utc)
       VALUES (?, ?, ?, ?, ?, ?)

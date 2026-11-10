@@ -63,6 +63,10 @@ async function handleSetupInteraction(interaction, { guildRepo, livePanels }) {
     return interaction.reply({ content: "❌ Setup commands must be run inside a guild.", ephemeral: true });
   }
 
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: "❌ Only server Administrators can use /setup.", ephemeral: true });
+  }
+
   const sub = interaction.options.getSubcommand();
   const guildId = interaction.guild.id;
 

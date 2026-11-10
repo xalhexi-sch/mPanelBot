@@ -1,8 +1,8 @@
 const { SlashCommandBuilder } = require("discord.js");
-const { isAuthorizedAdmin } = require("./moderation");
+const { isAuthorizedAdmin, adminOnly } = require("./moderation");
 
 function buildConsoleCommand() {
-  return new SlashCommandBuilder()
+  return adminOnly(new SlashCommandBuilder())
     .setName("run")
     .setDescription("Execute an approved in-game/Rocket console command")
     .addStringOption((o) =>

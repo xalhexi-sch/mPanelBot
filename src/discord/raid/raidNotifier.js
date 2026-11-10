@@ -113,6 +113,7 @@ class RaidNotifier {
           await channel.send({
             content: mentions,
             embeds: [embed],
+            allowedMentions: { users: targetDiscordIds.map(String).filter((id) => /^\d{5,25}$/.test(id)).slice(0, 100) },
           });
         }
       } catch (err) {

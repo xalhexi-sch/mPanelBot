@@ -32,9 +32,11 @@ const { buildConsoleCommand, handleConsoleInteraction } = require("./commands/co
 const { buildStatusCommand, handleStatusInteraction } = require("./commands/status");
 
 class DiscordBotClient {
-  constructor({ token, clientId, guildRepo, linkRepo, statsRepo, statsService, snapshotRepo, moderationService, linkService }) {
+  constructor({ token, clientId, guildPolicy = null, guildRepo, linkRepo, statsRepo, statsService, snapshotRepo, moderationService, linkService }) {
     this.token = token;
     this.clientId = clientId;
+    this.guildPolicy = guildPolicy;
+    this._lastActivity = null;
     this.guildRepo = guildRepo;
     this.linkRepo = linkRepo;
     this.statsRepo = statsRepo;
@@ -51,6 +53,8 @@ class DiscordBotClient {
     this.wsServer = null;
 
     this.client = new Client({
+      // Never let relayed/user text ping anyone; code that really wants a ping passes explicit `allowedMentions.users`.
+      allowedMentions: { parse: [], repliedUser: false },
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
@@ -108,6 +112,7 @@ class DiscordBotClient {
     this.client.once("ready", async () => {
       console.log(`[discord] Logged in as ${this.client.user.tag}`);
       this.updatePresence();
+      this.leaveForeignGuilds();
       if (this.livePanels) this.livePanels.start();
 
       // Register slash commands; fall back to the application id Discord reports for this token
@@ -124,22 +129,56 @@ class DiscordBotClient {
       }
     });
 
+    this.client.on("guildCreate", (guild) => {
+      if (this.guildPolicy && !this.guildPolicy.isAllowed(guild.id) && !this.guildPolicy.isUnclaimed) {
+        console.warn(`[discord] Leaving unauthorised guild ${guild.id}. Turn off "Public Bot" in the Developer Portal to stop invites.`);
+        guild.leave().catch(() => {});
+      }
+    });
+
     this.client.on("guildMemberAdd", async (member) => {
-      if (this.roleSyncManager) {
-        await this.roleSyncManager.syncMember(member);
+      try {
+        if (this.roleSyncManager && this.isGuildAllowed(member.guild?.id)) {
+          await this.roleSyncManager.syncMember(member);
+        }
+      } catch (err) {
+        console.warn(`[discord] guildMemberAdd handler failed: ${err.message}`);
       }
     });
 
     this.client.on("messageCreate", async (message) => {
-      if (this.chatRelay) {
-        await this.chatRelay.handleDiscordMessage(message);
+      try {
+        if (this.chatRelay && this.isGuildAllowed(message.guildId)) {
+          await this.chatRelay.handleDiscordMessage(message);
+        }
+      } catch (err) {
+        console.warn(`[discord] messageCreate handler failed: ${err.message}`);
       }
     });
 
     this.client.on("interactionCreate", async (interaction) => {
       if (!interaction.isChatInputCommand()) return;
-      await this.handleInteraction(interaction);
+      try {
+        await this.handleInteraction(interaction);
+      } catch (err) {
+        console.warn(`[discord] interaction handler failed: ${err.message}`);
+      }
     });
+  }
+
+  /** Without a policy (unit tests, legacy wiring) every guild is allowed. */
+  isGuildAllowed(guildId) {
+    return !this.guildPolicy || this.guildPolicy.isAllowed(guildId);
+  }
+
+  leaveForeignGuilds() {
+    if (!this.guildPolicy || this.guildPolicy.isUnclaimed) return;
+    for (const guild of this.client.guilds.cache.values()) {
+      if (!this.guildPolicy.isAllowed(guild.id)) {
+        console.warn(`[discord] Leaving unauthorised guild ${guild.id}.`);
+        guild.leave().catch(() => {});
+      }
+    }
   }
 
   updatePresence() {
@@ -154,19 +193,24 @@ class DiscordBotClient {
       totalMax += s.maxPlayers || 0;
     }
 
-    if (totalMax > 0) {
-      this.client.user.setActivity(`${totalOnline}/${totalMax} Players`, {
-        type: ActivityType.Watching,
-      });
-    } else {
-      this.client.user.setActivity("Unturned Servers", {
-        type: ActivityType.Watching,
-      });
-    }
+    const text = totalMax > 0 ? `${totalOnline}/${totalMax} Players` : "Unturned Servers";
+    // Gateway presence updates are rate limited; skip the call when nothing changed.
+    if (text === this._lastActivity) return;
+    this._lastActivity = text;
+    this.client.user.setActivity(text, { type: ActivityType.Watching });
   }
 
   async handleInteraction(interaction) {
     const cmd = interaction.commandName;
+
+    // Only the operator's guild(s) may drive the bot. The first /setup by an Administrator claims an unclaimed bot.
+    if (this.guildPolicy) {
+      const isAdmin = interaction.memberPermissions?.has?.("Administrator");
+      const claimed = cmd === "setup" && isAdmin && interaction.guildId && this.guildPolicy.claimIfUnclaimed(interaction.guildId);
+      if (!claimed && !this.guildPolicy.isAllowed(interaction.guildId)) {
+        return interaction.reply({ content: "❌ This bot is not authorised for this server.", ephemeral: true }).catch(() => {});
+      }
+    }
     const context = {
       guildRepo: this.guildRepo,
       linkRepo: this.linkRepo,

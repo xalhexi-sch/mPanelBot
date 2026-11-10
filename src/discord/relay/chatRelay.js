@@ -12,6 +12,21 @@ class ChatRelay {
     // Loop prevention: in-memory LRU tracking of recent message IDs
     this.recentMessageIds = new Set();
     this.recentMessageOrder = [];
+
+    // Per-Discord-user flood guard: one relayed line per `userCooldownMs`.
+    this.userCooldownMs = 1500;
+    this.lastRelayAt = new Map();
+  }
+
+  /** @returns {boolean} true when this user may relay now. Map is pruned so it stays small. */
+  allowUser(userId, now = Date.now()) {
+    const last = this.lastRelayAt.get(userId) || 0;
+    if (now - last < this.userCooldownMs) return false;
+    this.lastRelayAt.set(userId, now);
+    if (this.lastRelayAt.size > 1000) {
+      for (const [id, t] of this.lastRelayAt) if (now - t > this.userCooldownMs) this.lastRelayAt.delete(id);
+    }
+    return true;
   }
 
   isChatChannel(channelId) {
@@ -70,6 +85,7 @@ class ChatRelay {
 
     const sessions = this.wsServer.getActiveSessions();
     if (sessions.length === 0) return;
+    if (!this.allowUser(message.author?.id || "unknown")) return;
 
     const authorName = message.member?.displayName || message.author.displayName || message.author.username || "Discord";
     const avatarUrl = message.author.displayAvatarURL ? message.author.displayAvatarURL({ size: 64, extension: "png" }) : null;
@@ -101,18 +117,18 @@ class ChatRelay {
       timeoutMs: 8000,
     });
 
-    let delivered = false;
-    for (const session of sessions) {
-      try {
-        commandEnvelope.serverId = session.serverId;
-        const res = await session.sendCommand(commandEnvelope, 8000);
-        if (res?.payload?.delivered !== false && res?.payload?.success !== false) {
-          delivered = true;
-        }
-      } catch (err) {
-        console.warn(`[chatRelay] Relay to ${session.serverId} failed: ${err.message}`);
-      }
-    }
+    // Fan out in parallel: one hung server must not delay delivery to the others by its full timeout.
+    const results = await Promise.allSettled(
+      sessions.map((session) =>
+        session.sendCommand({ ...commandEnvelope, serverId: session.serverId }, 8000).catch((err) => {
+          console.warn(`[chatRelay] Relay to ${session.serverId} failed: ${err.message}`);
+          throw err;
+        })
+      )
+    );
+    const delivered = results.some(
+      (r) => r.status === "fulfilled" && r.value?.payload?.delivered !== false && r.value?.payload?.success !== false
+    );
 
     if (delivered) {
       try {

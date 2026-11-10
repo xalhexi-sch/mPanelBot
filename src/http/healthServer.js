@@ -15,7 +15,17 @@ function createHealthServer({ wsServer }) {
 
     if (req.method === "GET" && (pathname === "/health" || pathname === "/api/health")) {
       const body = { status: "ok" };
+      // Bearer guesses here share the failed-auth throttle with the WebSocket upgrade.
+      const address = wsServer?.clientAddress?.(req) || req.socket.remoteAddress;
+      const throttled = wsServer && !wsServer.isThrottleExempt?.(address);
+      if (throttled && wsServer.authThrottle.blockedFor(address) > 0) {
+        res.writeHead(429, headers);
+        res.end(JSON.stringify({ error: "Too Many Requests" }));
+        return;
+      }
+      const presented = Boolean(req.headers["authorization"]);
       const authed = wsServer?.authenticate?.(req.headers["authorization"]);
+      if (throttled && presented && !authed?.ok) wsServer.authThrottle.recordFailure(address);
 
       if (authed?.ok && !authed.keyServerId) {
         body.uptimeSeconds = Math.floor(process.uptime());
