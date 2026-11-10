@@ -10,6 +10,10 @@
     "bindAddress": "0.0.0.0",
     "port": 28600,
     "apiKey": "PASTE_OR_GENERATE_SHARED_API_KEY",
+    "serverKeys": {
+      "survival-1": "PASTE_OR_GENERATE_DEDICATED_KEY_FOR_SURVIVAL_1"
+    },
+    "setupMode": false,
     "heartbeatIntervalMs": 30000,
     "maxPayloadSizeBytes": 262144,
     "trustProxy": false

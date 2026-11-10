@@ -37,8 +37,13 @@ describe("WebSocket server robustness", () => {
     if (http) await new Promise((r) => http.close(() => r()));
     server = http = null;
   });
-  async function start(opts) {
-    server = new GameWebSocketServer({ apiKey: KEY, heartbeatIntervalMs: 60000, ...opts });
+  async function start(opts = {}) {
+    server = new GameWebSocketServer({
+      apiKey: KEY,
+      serverKeys: { real: KEY, s1: KEY, ...(opts.serverKeys || {}) },
+      heartbeatIntervalMs: 60000,
+      ...opts,
+    });
     http = createHealthServer({ wsServer: server });
     await new Promise((r) => http.listen(0, "127.0.0.1", r));
     return http.address().port;

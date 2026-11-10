@@ -71,10 +71,15 @@ async function runSetup() {
       network: {
         heartbeatIntervalMs: 30000,
         maxPayloadSizeBytes: 262144,
+        setupMode: false,
         ...(existingConfig.network || {}),
         bindAddress: existingConfig?.network?.bindAddress || "0.0.0.0",
         port,
         apiKey,
+        serverKeys: {
+          "survival-1": apiKey,
+          ...(existingConfig?.network?.serverKeys || {}),
+        },
       },
       storage: { sqlitePath: existingConfig?.storage?.sqlitePath || "./data/mpanel.sqlite" },
       integrations: {

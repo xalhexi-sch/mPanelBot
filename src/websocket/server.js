@@ -27,6 +27,7 @@ class GameWebSocketServer extends EventEmitter {
     heartbeatIntervalMs = 30000,
     maxPayloadSizeBytes = 262144,
     serverKeys = {},
+    setupMode = false,
     messageRatePerSec = 40,
     messageBurst = 200,
     authThrottle = new AuthThrottle(),
@@ -37,8 +38,9 @@ class GameWebSocketServer extends EventEmitter {
     // X-Forwarded-For. Otherwise every game server would share the proxy's address and one bad client could lock all out.
     this.trustProxy = Boolean(trustProxy);
     this.apiKey = String(apiKey || "");
-    // Optional dedicated key per ServerId. When a server has one, the shared key can no longer impersonate it.
+    // Dedicated key per ServerId. Per-server keys are mandatory: the shared key cannot speak for servers.
     this.serverKeys = new Map(Object.entries(serverKeys || {}).filter(([id, k]) => SERVER_ID_PATTERN.test(id) && k));
+    this.setupMode = Boolean(setupMode);
     this.messageRatePerSec = messageRatePerSec;
     this.messageBurst = messageBurst;
     this.authThrottle = authThrottle;
@@ -51,20 +53,26 @@ class GameWebSocketServer extends EventEmitter {
   }
 
   /**
-   * @returns {{ok:boolean, keyServerId:string|null}} keyServerId is set when a per-server key matched.
+   * @returns {{ok:boolean, keyServerId:string|null, providedKey:string}}
    * Every candidate is compared (no early exit) so timing does not reveal which key was close.
    */
   authenticate(headerValue) {
-    if (!headerValue || typeof headerValue !== "string") return { ok: false, keyServerId: null };
+    if (!headerValue || typeof headerValue !== "string") return { ok: false, keyServerId: null, providedKey: "" };
     const provided = (headerValue.startsWith("Bearer ") ? headerValue.slice(7) : headerValue).trim();
-    if (!provided) return { ok: false, keyServerId: null };
+    if (!provided) return { ok: false, keyServerId: null, providedKey: "" };
 
-    let result = { ok: false, keyServerId: null };
-    if (this.apiKey && safeEqual(provided, this.apiKey)) result = { ok: true, keyServerId: null };
+    let keyServerId = null;
+    let matchedServerKey = false;
     for (const [serverId, key] of this.serverKeys) {
-      if (safeEqual(provided, key) && !result.ok) result = { ok: true, keyServerId: serverId };
+      if (safeEqual(provided, key)) {
+        matchedServerKey = true;
+        keyServerId = serverId;
+      }
     }
-    return result;
+
+    const matchedSharedKey = Boolean(this.apiKey && safeEqual(provided, this.apiKey));
+    const ok = matchedServerKey || matchedSharedKey;
+    return { ok, keyServerId, providedKey: provided };
   }
 
   /** Peer address used for throttling (the real client when a trusted local proxy supplies it). */
@@ -112,7 +120,7 @@ class GameWebSocketServer extends EventEmitter {
     this.authThrottle.recordSuccess(address);
     req.clientAddress = address;
     this.wss.handleUpgrade(req, socket, head, (ws) => {
-      req.keyServerId = auth.keyServerId;
+      req.providedKey = auth.providedKey;
       this.wss.emit("connection", ws, req);
     });
   }
@@ -208,14 +216,46 @@ class GameWebSocketServer extends EventEmitter {
         parsed.serverId = serverId;
         const payload = parsed.payload || {};
 
-        // Identity rules: well-formed id, and a per-server key may only speak for its own server.
-        const dedicated = this.serverKeys.get(serverId);
-        const keyBelongsElsewhere = req.keyServerId && req.keyServerId !== serverId;
-        const sharedKeyOnProtectedServer = dedicated && !req.keyServerId;
-        if (!SERVER_ID_PATTERN.test(serverId) || keyBelongsElsewhere || sharedKeyOnProtectedServer) {
+        // Identity rules: well-formed id, dedicated key binding, and shared key rejection.
+        if (!SERVER_ID_PATTERN.test(serverId)) {
           if (!this.isThrottleExempt(remoteAddress)) this.authThrottle.recordFailure(remoteAddress);
           this.emit("auth_failed", { remoteAddress, url: "hello", blocked: false });
-          ws.close(4005, "Not authorised for this server id");
+          ws.close(4005, "Malformed serverId");
+          return;
+        }
+
+        const dedicatedKey = this.serverKeys.get(serverId);
+        const hasDedicatedKey = Boolean(dedicatedKey);
+        const matchesDedicatedKey = hasDedicatedKey && safeEqual(req.providedKey, dedicatedKey);
+        const matchesSharedKey = Boolean(this.apiKey && safeEqual(req.providedKey, this.apiKey));
+        const isAlreadyConnected = this.sessions.has(serverId);
+
+        let authorized = false;
+        let rejectReason = "Not authorised for this server id";
+
+        if (hasDedicatedKey) {
+          if (matchesDedicatedKey) {
+            authorized = true;
+          } else {
+            rejectReason = "Dedicated key mismatch for this server id";
+          }
+        } else {
+          // No dedicated key for this serverId
+          if (this.setupMode && matchesSharedKey) {
+            if (!isAlreadyConnected) {
+              authorized = true;
+            } else {
+              rejectReason = "Cannot replace active session using shared API key";
+            }
+          } else {
+            rejectReason = "Per-server key required; shared API key cannot be used for hello";
+          }
+        }
+
+        if (!authorized) {
+          if (!this.isThrottleExempt(remoteAddress)) this.authThrottle.recordFailure(remoteAddress);
+          this.emit("auth_failed", { remoteAddress, url: "hello", blocked: false });
+          ws.close(4005, rejectReason);
           return;
         }
 

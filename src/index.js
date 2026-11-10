@@ -72,10 +72,20 @@ async function main() {
     heartbeatIntervalMs: config.network.heartbeatIntervalMs,
     maxPayloadSizeBytes: config.network.maxPayloadSizeBytes,
     serverKeys: config.network.serverKeys,
+    setupMode: config.network.setupMode,
     messageRatePerSec: config.network.messageRatePerSec,
     messageBurst: config.network.messageBurst,
     trustProxy: config.network.trustProxy,
   });
+
+  const dedicatedCount = Object.keys(config.network.serverKeys).length;
+  if (dedicatedCount > 0) {
+    console.log(`[websocket] Per-server keys configured for: ${Object.keys(config.network.serverKeys).join(", ")}`);
+  } else if (config.network.setupMode) {
+    console.warn("[websocket] setupMode is enabled: shared API key accepted for unknown server IDs.");
+  } else {
+    console.warn("[websocket] No dedicated server keys in network.serverKeys. Configure per-server keys or enable setupMode.");
+  }
 
   const healthServer = createHealthServer({
     wsServer,

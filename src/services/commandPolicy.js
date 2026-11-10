@@ -60,12 +60,14 @@ function parseDurationToMinutes(value) {
   if (/^\d+$/.test(raw)) return Math.max(1, Number(raw));
 
   let totalSeconds = 0;
+  let reconstructed = "";
   const re = /(\d+)\s*(w|week|weeks|d|day|days|h|hr|hour|hours|m|min|minute|minutes|s|sec|second|seconds)/g;
   let match;
   let matchedAny = false;
 
   while ((match = re.exec(raw)) !== null) {
     matchedAny = true;
+    reconstructed += match[0];
     const amount = Number(match[1]);
     const unit = match[2];
 
@@ -77,6 +79,14 @@ function parseDurationToMinutes(value) {
   }
 
   if (!matchedAny || totalSeconds <= 0) return null;
+
+  // Verify all characters were accounted for (matches C# ModerationValidator)
+  const strippedOriginal = raw.replace(/\s+/g, "");
+  const strippedReconstructed = reconstructed.replace(/\s+/g, "");
+  if (strippedOriginal !== strippedReconstructed) {
+    return null;
+  }
+
   return Math.max(1, Math.round(totalSeconds / 60));
 }
 
@@ -127,7 +137,14 @@ function buildModerationCommand(action, steam64, reason = "", duration = null) {
 
   const sid = steamVal.steamId;
   const cleanReason = sanitizeString(reason || "No reason specified", 150);
-  const minutes = duration ? parseDurationToMinutes(duration) : null;
+
+  let minutes = null;
+  if (duration !== null && duration !== undefined && String(duration).trim() !== "") {
+    minutes = parseDurationToMinutes(duration);
+    if (minutes === null) {
+      throw new Error(`Invalid duration: '${duration}'. Use formats like '30m', '2h', '1d', or '1w'.`);
+    }
+  }
 
   let fullCommand = "";
   const act = action.toLowerCase().trim();

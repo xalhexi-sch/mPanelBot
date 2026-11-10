@@ -107,6 +107,7 @@ function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
       heartbeatIntervalMs: Number(parsed?.network?.heartbeatIntervalMs || 30000),
       maxPayloadSizeBytes: Number(parsed?.network?.maxPayloadSizeBytes || 262144),
       serverKeys: loadServerKeys(parsed?.network?.serverKeys),
+      setupMode: Boolean(parsed?.network?.setupMode || process.env.MPANEL_SETUP_MODE === "true"),
       messageRatePerSec: Number(parsed?.network?.messageRatePerSec || 40),
       messageBurst: Number(parsed?.network?.messageBurst || 200),
       trustProxy: Boolean(parsed?.network?.trustProxy),

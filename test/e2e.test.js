@@ -84,7 +84,11 @@ describe("plugin <-> bot end-to-end contract", () => {
       guildRepo: { getAllGuildConfigs: () => [] },
     });
 
-    wsServer = new GameWebSocketServer({ apiKey: API_KEY, heartbeatIntervalMs: 60000 });
+    wsServer = new GameWebSocketServer({
+      apiKey: API_KEY,
+      serverKeys: { [SERVER_ID]: API_KEY },
+      heartbeatIntervalMs: 60000,
+    });
     httpServer = http.createServer();
     wsServer.attach(httpServer);
 

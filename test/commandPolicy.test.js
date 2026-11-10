@@ -24,6 +24,9 @@ describe("Command Policy & Security Verification", () => {
     assert.strictEqual(parseDurationToMinutes("1h 30m"), 90);
     assert.strictEqual(parseDurationToMinutes("60"), 60); // Raw number treated as minutes
     assert.strictEqual(parseDurationToMinutes("invalid"), null);
+    assert.strictEqual(parseDurationToMinutes("1.5h"), null); // Misparse prevented by reconstructed string check
+    assert.strictEqual(parseDurationToMinutes("10m junk"), null);
+    assert.strictEqual(parseDurationToMinutes("foo"), null);
   });
 
   it("should construct valid moderation command strings", () => {
@@ -44,6 +47,11 @@ describe("Command Policy & Security Verification", () => {
 
     const unban = buildModerationCommand("unban", "76561198000000001");
     assert.strictEqual(unban.fullCommand, "unban 76561198000000001");
+
+    // Invalid durations must throw rather than becoming permanent bans or mutes
+    assert.throws(() => buildModerationCommand("ban", "76561198000000001", "Cheating", "foo"), /Invalid duration/);
+    assert.throws(() => buildModerationCommand("ban", "76561198000000001", "Cheating", "1.5h"), /Invalid duration/);
+    assert.throws(() => buildModerationCommand("mute", "76561198000000001", "Spam", "bad"), /Invalid duration/);
   });
 
   it("should reject dangerous OS shell injection patterns in console commands", () => {

@@ -95,7 +95,7 @@ describe("WebSocket server hardening", () => {
   });
 
   it("closes a connection that floods messages", async () => {
-    const port = await start({ messageRatePerSec: 5, messageBurst: 10 });
+    const port = await start({ messageRatePerSec: 5, messageBurst: 10, setupMode: true });
     const { ws } = await connect(port, SHARED);
     const closed = new Promise((r) => ws.once("close", (code) => r(code)));
     for (let i = 0; i < 100; i++) ws.send(hello("flood-1"));
@@ -130,13 +130,35 @@ describe("WebSocket server hardening", () => {
     assert.strictEqual(await closedShared, 4005, "shared key cannot take over a protected server");
 
     const free = await connect(port, SHARED);
+    const closedFree = new Promise((r) => free.ws.once("close", (c) => r(c)));
+    free.ws.send(hello("server-c"));
+    assert.strictEqual(await closedFree, 4005, "shared key rejected for hello when per-server keys are mandatory");
+  });
+
+  it("setup mode accepts shared key only for unknown IDs and prevents hijacking active sessions", async () => {
+    const port = await start({ serverKeys: { "server-a": DEDICATED }, setupMode: true });
+
+    // In setup mode, an unknown server ID is accepted with the shared key
+    const free = await connect(port, SHARED);
     const ok = new Promise((r) => free.ws.on("message", (m) => JSON.parse(m).kind === "welcome" && r(true)));
     free.ws.send(hello("server-c"));
-    assert.ok(await ok, "shared key still works for unprotected servers");
+    assert.ok(await ok, "shared key accepted for unknown server ID in setup mode");
+
+    // An attacker cannot hijack that active session
+    const hijacker = await connect(port, SHARED);
+    const closedHijacker = new Promise((r) => hijacker.ws.once("close", (c) => r(c)));
+    hijacker.ws.send(hello("server-c"));
+    assert.strictEqual(await closedHijacker, 4005, "cannot replace active session using shared key");
+
+    // Shared key still cannot impersonate a dedicated server even in setup mode
+    const attacker = await connect(port, SHARED);
+    const closedAttacker = new Promise((r) => attacker.ws.once("close", (c) => r(c)));
+    attacker.ws.send(hello("server-a"));
+    assert.strictEqual(await closedAttacker, 4005, "shared key cannot impersonate a dedicated server even in setup mode");
   });
 
   it("health: public probe reveals nothing; only the shared key sees connected servers", async () => {
-    const port = await start({ serverKeys: { "server-a": DEDICATED } });
+    const port = await start({ serverKeys: { "server-a": DEDICATED }, setupMode: true });
     const { ws } = await connect(port, SHARED);
     const welcomed = new Promise((r) => ws.on("message", (m) => JSON.parse(m).kind === "welcome" && r(true)));
     ws.send(hello("server-z"));
