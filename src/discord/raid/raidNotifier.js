@@ -40,7 +40,7 @@ class RaidNotifier {
       embed.addFields({ name: "Weapon", value: weapon, inline: true });
     }
 
-    embed.setFooter({ text: "mPanel Group Raid Alerts" });
+    embed.setFooter({ text: "Raid Alerts" });
     return embed;
   }
 

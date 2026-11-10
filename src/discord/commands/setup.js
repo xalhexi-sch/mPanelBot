@@ -8,7 +8,7 @@ const {
 function buildSetupCommand() {
   return new SlashCommandBuilder()
     .setName("setup")
-    .setDescription("Configure mPanel channels, roles, and settings for this guild")
+    .setDescription("Configure channels, roles, and settings for this guild")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addSubcommand((sub) =>
       sub
@@ -50,11 +50,11 @@ function buildSetupCommand() {
           o.setName("linked_role").setDescription("Role awarded to players who link their Steam account")
         )
         .addRoleOption((o) =>
-          o.setName("admin_role").setDescription("Additional role permitted to run mPanel moderation commands")
+          o.setName("admin_role").setDescription("Additional role permitted to run moderation commands")
         )
     )
     .addSubcommand((sub) =>
-      sub.setName("show").setDescription("Display current guild mPanel configuration")
+      sub.setName("show").setDescription("Display current guild configuration")
     );
 }
 
@@ -101,7 +101,7 @@ async function handleSetupInteraction(interaction, { guildRepo, livePanels }) {
           let existingWh = null;
           if (webhooks && typeof webhooks.find === "function") {
             existingWh = webhooks.find(
-              (w) => w.name === "mPanel Chat Relay" || (botUserId && w.owner?.id === botUserId)
+              (w) => w.name === "Chat Relay" || (botUserId && w.owner?.id === botUserId)
             );
           }
 
@@ -111,9 +111,9 @@ async function handleSetupInteraction(interaction, { guildRepo, livePanels }) {
           } else if (typeof chatCh.createWebhook === "function") {
             const avatarUrl = interaction.client?.user?.displayAvatarURL ? interaction.client.user.displayAvatarURL() : null;
             const newWh = await chatCh.createWebhook({
-              name: "mPanel Chat Relay",
+              name: "Chat Relay",
               avatar: avatarUrl,
-              reason: "mPanel in-game chat relay webhook",
+              reason: "In-game chat relay webhook",
             });
             updates.chatWebhookUrl = newWh.url;
             webhookNote = " *(created new webhook)*";
@@ -228,7 +228,7 @@ async function handleSetupInteraction(interaction, { guildRepo, livePanels }) {
 
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
-      .setTitle(`⚙️ mPanel Guild Configuration (${interaction.guild.name})`)
+      .setTitle(`⚙️ Server Configuration (${interaction.guild.name})`)
       .addFields(
         { name: "Raid Channel", value: cfg.raidChannelId ? `<#${cfg.raidChannelId}>` : "*Not configured*", inline: true },
         { name: "Chat Relay Channel", value: cfg.chatChannelId ? `<#${cfg.chatChannelId}>` : "*Not configured*", inline: true },

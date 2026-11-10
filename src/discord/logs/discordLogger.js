@@ -269,7 +269,7 @@ class DiscordLogger {
           { name: "Server", value: `\`${serverId || "Unknown"}\``, inline: true }
         )
         .setTimestamp()
-        .setFooter({ text: "mPanel Logging" });
+        .setFooter({ text: "Logs" });
 
       const dur = duration !== undefined ? duration : (durationSeconds ? formatDuration(durationSeconds) : null);
       if (dur) {

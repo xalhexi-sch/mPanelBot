@@ -32,10 +32,10 @@ class RoleSyncManager {
 
     try {
       if (action === "ADD") {
-        await member.roles.add(linkedRoleId, "mPanel: Account linked to Steam");
+        await member.roles.add(linkedRoleId, "Account linked to Steam");
         return "ADDED";
       } else if (action === "REMOVE") {
-        await member.roles.remove(linkedRoleId, "mPanel: Account unlinked");
+        await member.roles.remove(linkedRoleId, "Account unlinked");
         return "REMOVED";
       }
     } catch (err) {

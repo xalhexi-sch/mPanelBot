@@ -119,15 +119,15 @@ class ChatRelay {
       const webhooks = await channel.fetchWebhooks();
       const botUserId = this.client.user?.id;
       let webhook = webhooks.find(
-        (w) => w.name === "mPanel Chat Relay" || (botUserId && w.owner?.id === botUserId)
+        (w) => w.name === "Chat Relay" || (botUserId && w.owner?.id === botUserId)
       );
 
       if (!webhook && typeof channel.createWebhook === "function") {
         const avatarUrl = this.client.user?.displayAvatarURL ? this.client.user.displayAvatarURL() : null;
         webhook = await channel.createWebhook({
-          name: "mPanel Chat Relay",
+          name: "Chat Relay",
           avatar: avatarUrl,
-          reason: "mPanel in-game chat relay webhook",
+          reason: "In-game chat relay webhook",
         });
       }
 

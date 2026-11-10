@@ -22,7 +22,7 @@ class SteamAvatarService {
   }
 
   async _xml(url) {
-    const res = await this.fetch(url, { signal: AbortSignal.timeout(this.timeoutMs), headers: { "user-agent": "mPanelBot/1.0" } });
+    const res = await this.fetch(url, { signal: AbortSignal.timeout(this.timeoutMs), headers: { "user-agent": "Mozilla/5.0" } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.text();
   }

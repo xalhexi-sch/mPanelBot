@@ -333,12 +333,12 @@ describe("ChatRelay Architecture & Webhook Redesign Tests", () => {
       assert.ok(replyContent.includes("Manage Webhooks"), "Must report missing Manage Webhooks permission");
     });
 
-    it("should reuse existing mPanel Chat Relay webhook and prevent duplicates", async () => {
+    it("should reuse existing Chat Relay webhook and prevent duplicates", async () => {
       let createdNew = false;
       let replyContent = null;
 
       const existingWebhook = {
-        name: "mPanel Chat Relay",
+        name: "Chat Relay",
         url: "https://discord.com/api/webhooks/reuse/secret_token",
         owner: { id: "bot-user-123" },
       };
@@ -387,7 +387,7 @@ describe("ChatRelay Architecture & Webhook Redesign Tests", () => {
         fetchWebhooks: async () => [],
         createWebhook: async (options) => {
           created = true;
-          assert.strictEqual(options.name, "mPanel Chat Relay");
+          assert.strictEqual(options.name, "Chat Relay");
           return { name: options.name, url: "https://discord.com/api/webhooks/fresh/new_token" };
         },
       };

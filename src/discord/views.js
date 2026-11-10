@@ -214,7 +214,7 @@ function buildPlayerStatsEmbed(s) {
   const rank = s.rank && s.total ? `\n🏆 Rank (Kills): **#${s.rank}** / **${s.total}**` : "";
   return new EmbedBuilder()
     .setColor(BRAND_COLOR)
-    .setAuthor({ name: "mPanel — Player Stats" })
+    .setAuthor({ name: "Player Stats" })
     .setDescription(`🏅 **${nameLink(s.playerName, s.steamId, 32)}**\nSteam64: \`${s.steamId}\`${rank}`)
     .addFields(
       { name: "Kills", value: `**${s.kills}**`, inline: true },
