@@ -39,10 +39,13 @@ describe("views", () => {
     assert.match(e.description, /Offline/);
   });
 
-  it("keeps the top-10 leaderboard within Discord field limits", () => {
+  it("renders the old-style leaderboard: underlined headers + one row per rank, within Discord limits", () => {
     const rows = Array.from({ length: 10 }, (_, i) => ({ steam_id: `${i}`, player_name: "A".repeat(40), kills: 1e6, deaths: 1e6, playtime_seconds: 1e9 }));
     const e = buildLeaderboardEmbed({ kills: rows, playtime: rows, deaths: rows }).toJSON();
-    assert.strictEqual(e.fields.length, 3);
+    assert.strictEqual(e.fields.length, 18);
+    assert.strictEqual(e.fields[0].name, "__Most Kills__");
+    assert.ok(e.fields[3].value.startsWith("> 🥇 **["));
+    assert.match(e.fields[3].value, /\*\*AAAAAAAAAAAAA…\*\*|\*\*\[A+…\]/);
     for (const f of e.fields) assert.ok(f.value.length <= 1024);
   });
 });

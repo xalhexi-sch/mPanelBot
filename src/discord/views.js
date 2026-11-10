@@ -30,6 +30,15 @@ function formatDuration(seconds) {
   return `${s}s`;
 }
 
+/** Full-precision duration like the old board: 11d 17h 48m 2s */
+function formatLong(seconds) {
+  let s = Math.max(0, Math.floor(Number(seconds) || 0));
+  const d = Math.floor(s / 86400); s %= 86400;
+  const h = Math.floor(s / 3600); s %= 3600;
+  const m = Math.floor(s / 60); s %= 60;
+  return `${d ? d + "d " : ""}${h ? h + "h " : ""}${m ? m + "m " : ""}${s}s`;
+}
+
 function kdr(kills, deaths) {
   const k = Number(kills) || 0;
   const d = Number(deaths) || 0;
@@ -59,7 +68,7 @@ function buildServerStatusEmbed(snap, { online = true, page = 0, perPage = 9 } =
     return embed;
   }
 
-  embed.setDescription(`> **${snap.map || "Unknown map"} ◾️ 👥 ${count}/${snap.maxPlayers || 0} ◾️ \`${snap.serverId}\`**`);
+  embed.setDescription(`> **${snap.map || "Unknown map"} ◾️ 👥 ${count}/${snap.maxPlayers || 0}**`);
 
   if (slice.length) {
     for (const p of slice) {
@@ -115,26 +124,36 @@ function buildStatusEmbeds(snapshots, activeIds, { page = 0 } = {}) {
   return embeds;
 }
 
-function boardColumn(rows, valueFn) {
-  if (!rows.length) return "_No data yet_";
-  return rows
-    .map((r, i) => `${rankEmoji(i)} ${nameLink(r.player_name, r.steam_id, 15)}\n┗ ${valueFn(r)}`)
-    .join("\n")
-    .slice(0, 1024);
-}
+const BOARD_SIZE = 5; // 3 headers + 3 x 5 rows = 18 fields (Discord max 25)
+const rankMedal = (i) => MEDALS[i] || "🏅";
 
-/** Three-column leaderboard (Kills / Playtime / Deaths). */
-function buildLeaderboardEmbed({ kills, playtime, deaths }, { source = "sqlite" } = {}) {
-  return new EmbedBuilder()
+/**
+ * Old Blood Horizon leaderboard layout: underlined column headers, then one 3-wide row per rank.
+ * `iconURL` is the bot avatar shown in the author line.
+ */
+function buildLeaderboardEmbed({ kills, playtime, deaths }, { iconURL = null, title = "Blood Horizon Leaderboard" } = {}) {
+  const embed = new EmbedBuilder()
     .setColor(BRAND_COLOR)
-    .setTitle("🏆 Leaderboards")
+    .setAuthor(iconURL ? { name: title, iconURL } : { name: title })
     .addFields(
-      { name: "⚔️ Most Kills", value: boardColumn(kills, (r) => `**${r.kills}** kills`), inline: true },
-      { name: "⏳ Most Play Time", value: boardColumn(playtime, (r) => `**${formatDuration(r.playtime_seconds)}**`), inline: true },
-      { name: "💀 Most Deaths", value: boardColumn(deaths, (r) => `**${r.deaths}** deaths`), inline: true }
-    )
-    .setFooter({ text: `mPanel Leaderboards${source === "mysql" ? " • MySQL" : ""}` })
-    .setTimestamp();
+      { name: "__Most Kills__", value: ZWS, inline: true },
+      { name: "__Most Play Time__", value: ZWS, inline: true },
+      { name: "__Most Deaths__", value: ZWS, inline: true }
+    );
+
+  const cell = (r, i, valueText) =>
+    r ? `> ${rankMedal(i)} **${nameLink(r.player_name, r.steam_id, 14)}**
+> ${valueText(r)}` : `> ${rankMedal(i)} **—**
+> _no data_`;
+
+  for (let i = 0; i < BOARD_SIZE; i++) {
+    embed.addFields(
+      { name: ZWS, value: cell(kills[i], i, (r) => `**${r.kills}** Kills`), inline: true },
+      { name: ZWS, value: cell(playtime[i], i, (r) => `**${formatLong(r.playtime_seconds)}**`), inline: true },
+      { name: ZWS, value: cell(deaths[i], i, (r) => `**${r.deaths}** Deaths`), inline: true }
+    );
+  }
+  return embed.setTimestamp();
 }
 
 function buildSingleBoardEmbed(metric, rows) {
@@ -174,6 +193,7 @@ module.exports = {
   ZWS,
   trimName,
   formatDuration,
+  formatLong,
   kdr,
   buildServerStatusEmbed,
   buildStatusEmbeds,

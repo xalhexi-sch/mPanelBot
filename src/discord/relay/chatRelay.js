@@ -7,7 +7,8 @@ const { redactWebhookUrl } = require("../../utils/security");
 const DEFAULT_AVATAR_URL = "https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg";
 
 class ChatRelay {
-  constructor({ discordClient, wsServer, guildRepo, webhookQueue = null }) {
+  constructor({ discordClient, wsServer, guildRepo, webhookQueue = null, avatars = null }) {
+    this.avatars = avatars;
     this.client = discordClient;
     this.wsServer = wsServer;
     this.guildRepo = guildRepo;
@@ -242,12 +243,12 @@ class ChatRelay {
       ? `[${sName}] ${cleanPlayerName}`.slice(0, 32)
       : cleanPlayerName.slice(0, 32);
 
+    // Real Steam avatar (cached, never blocks on failure), then the default
+    const steamAvatar = !avatarUrl && this.avatars ? await this.avatars.get(steamId) : null;
     const resolvedAvatar =
       avatarUrl && typeof avatarUrl === "string" && avatarUrl.startsWith("http")
         ? avatarUrl
-        : steamId
-        ? `https://avatars.steamstatic.com/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg`
-        : DEFAULT_AVATAR_URL;
+        : steamAvatar || DEFAULT_AVATAR_URL;
 
     const configs = this.guildRepo.getAllGuildConfigs();
 

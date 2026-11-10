@@ -41,9 +41,34 @@ function formatPlayer(name, steamId) {
 }
 
 class DiscordLogger {
-  constructor({ discordClient, guildRepo } = {}) {
+  constructor({ discordClient, guildRepo, avatars = null, snapshotRepo = null } = {}) {
     this.client = discordClient;
     this.guildRepo = guildRepo;
+    this.avatars = avatars;
+    this.snapshotRepo = snapshotRepo;
+  }
+
+  /** Human server name (from the live snapshot) falling back to the server id. */
+  _serverLabel(serverId) {
+    try {
+      const snap = this.snapshotRepo?.getSnapshot(serverId);
+      if (snap?.serverName) return snap.serverName;
+    } catch {}
+    return serverId || "Unknown";
+  }
+
+  /** Compact log card: [steam avatar] **Name: text** with `Server • time` footer (matches the old Blood Horizon logs). */
+  async _playerLine({ color, steamId, playerName, text, serverId }) {
+    const name = String(playerName || "Unknown").slice(0, 64);
+    const icon = this.avatars && steamId ? await this.avatars.get(steamId).catch(() => null) : null;
+    const author = { name: `${name}${text ? `: ${text}` : ""}`.slice(0, 256) };
+    if (icon) author.iconURL = icon;
+    if (steamId) author.url = `https://steamcommunity.com/profiles/${steamId}`;
+    return new EmbedBuilder()
+      .setColor(color)
+      .setAuthor(author)
+      .setFooter({ text: this._serverLabel(serverId) })
+      .setTimestamp();
   }
 
   async _broadcastToChannel(channelKey, embed) {
@@ -105,22 +130,8 @@ class DiscordLogger {
 
   async logPlayerConnected(data = {}) {
     try {
-      const { serverId, steamId, playerName, ping } = data || {};
-      const embed = new EmbedBuilder()
-        .setColor(0x57f287) // Green
-        .setTitle("🟢 Player Connected")
-        .addFields(
-          { name: "Player", value: formatPlayer(playerName, steamId), inline: true },
-          { name: "Steam64 ID", value: steamId ? `\`${steamId}\`` : "Unknown", inline: true },
-          { name: "Server", value: `\`${serverId || "Unknown"}\``, inline: true }
-        )
-        .setTimestamp()
-        .setFooter({ text: "mPanel Logging" });
-
-      if (ping != null && !isNaN(Number(ping))) {
-        embed.addFields({ name: "Ping", value: `${ping}ms`, inline: true });
-      }
-
+      const { serverId, steamId, playerName } = data || {};
+      const embed = await this._playerLine({ color: 0x57f287, steamId, playerName, text: "joined the server", serverId });
       await this._broadcastToChannel("joinLeaveChannelId", embed);
     } catch (err) {
       console.warn(`[discordLogger] Unexpected error in logPlayerConnected: ${err.message}`);
@@ -131,22 +142,8 @@ class DiscordLogger {
     try {
       const { serverId, steamId, playerName, durationSeconds, sessionLengthSeconds } = data || {};
       const duration = durationSeconds !== undefined ? durationSeconds : sessionLengthSeconds;
-
-      const embed = new EmbedBuilder()
-        .setColor(0xed4245) // Red
-        .setTitle("🔴 Player Disconnected")
-        .addFields(
-          { name: "Player", value: formatPlayer(playerName, steamId), inline: true },
-          { name: "Steam64 ID", value: steamId ? `\`${steamId}\`` : "Unknown", inline: true },
-          { name: "Server", value: `\`${serverId || "Unknown"}\``, inline: true }
-        )
-        .setTimestamp()
-        .setFooter({ text: "mPanel Logging" });
-
-      if (duration != null) {
-        embed.addFields({ name: "Session Duration", value: formatDuration(duration), inline: true });
-      }
-
+      const text = duration != null ? `left the server (played ${formatDuration(duration)})` : "left the server";
+      const embed = await this._playerLine({ color: 0xd41111, steamId, playerName, text, serverId });
       await this._broadcastToChannel("joinLeaveChannelId", embed);
     } catch (err) {
       console.warn(`[discordLogger] Unexpected error in logPlayerDisconnected: ${err.message}`);
@@ -158,19 +155,7 @@ class DiscordLogger {
       const { serverId, steamId, playerName, command, commandText } = data || {};
       const rawCmd = command !== undefined ? command : commandText;
       const safeCommand = sanitizeLoggedCommand(rawCmd || "").replace(/`/g, "'") || "(empty)";
-
-      const embed = new EmbedBuilder()
-        .setColor(0x5865f2) // Blurple
-        .setTitle("⌨️ Player Command")
-        .addFields(
-          { name: "Player", value: formatPlayer(playerName, steamId), inline: true },
-          { name: "Steam64 ID", value: steamId ? `\`${steamId}\`` : "Unknown", inline: true },
-          { name: "Server", value: `\`${serverId || "Unknown"}\``, inline: true },
-          { name: "Command", value: `\`${safeCommand}\``, inline: false }
-        )
-        .setTimestamp()
-        .setFooter({ text: "mPanel Logging" });
-
+      const embed = await this._playerLine({ color: 0xd41111, steamId, playerName, text: safeCommand, serverId });
       await this._broadcastToChannel("commandLogChannelId", embed);
     } catch (err) {
       console.warn(`[discordLogger] Unexpected error in logCommand: ${err.message}`);

@@ -57,7 +57,7 @@ class LivePanels {
       return { content: "", embeds: embeds.map((e) => e.toJSON()) };
     }
     const boards = await this.statsService.getLeaderboards(10);
-    return { content: "", embeds: [buildLeaderboardEmbed(boards, { source: this.statsService.source }).toJSON()] };
+    return { content: "", embeds: [buildLeaderboardEmbed(boards, { iconURL: this.client.user?.displayAvatarURL?.() }).toJSON()] };
   }
 
   /** Serialises refreshes per guild+panel so a timer tick and `/setup panels` can never both post a new message. */

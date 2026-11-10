@@ -71,14 +71,10 @@ describe("DiscordLogger Unit & Integration Tests", () => {
 
       assert.strictEqual(sentMessages.length, 1);
       const embed = sentMessages[0].embeds[0].data;
-      assert.strictEqual(embed.title, "🟢 Player Connected");
+      assert.strictEqual(embed.author.name, "SurvivorOne: joined the server");
       assert.strictEqual(embed.color, 0x57f287);
-
-      const fields = embed.fields;
-      assert.ok(fields.some((f) => f.name === "Player" && f.value.includes("SurvivorOne")));
-      assert.ok(fields.some((f) => f.name === "Steam64 ID" && f.value.includes("76561198000000001")));
-      assert.ok(fields.some((f) => f.name === "Server" && f.value.includes("survival-1")));
-      assert.ok(fields.some((f) => f.name === "Ping" && f.value.includes("42ms")));
+      assert.strictEqual(embed.footer.text, "survival-1");
+      assert.ok(embed.author.url.endsWith("76561198000000001"));
     });
 
     it("should log player disconnected to joinLeaveChannelId with formatted duration", async () => {
@@ -100,12 +96,8 @@ describe("DiscordLogger Unit & Integration Tests", () => {
 
       assert.strictEqual(sentMessages.length, 1);
       const embed = sentMessages[0].embeds[0].data;
-      assert.strictEqual(embed.title, "🔴 Player Disconnected");
-      assert.strictEqual(embed.color, 0xed4245);
-
-      const fields = embed.fields;
-      assert.ok(fields.some((f) => f.name === "Player" && f.value.includes("SurvivorOne")));
-      assert.ok(fields.some((f) => f.name === "Session Duration" && f.value === "1h 1m 5s"));
+      assert.strictEqual(embed.author.name, "SurvivorOne: left the server (played 1h 1m 5s)");
+      assert.strictEqual(embed.color, 0xd41111);
     });
   });
 
@@ -129,12 +121,8 @@ describe("DiscordLogger Unit & Integration Tests", () => {
 
       assert.strictEqual(sentMessages.length, 1);
       const embed = sentMessages[0].embeds[0].data;
-      assert.strictEqual(embed.title, "⌨️ Player Command");
-      assert.strictEqual(embed.color, 0x5865f2);
-
-      const cmdField = embed.fields.find((f) => f.name === "Command");
-      assert.ok(cmdField);
-      assert.strictEqual(cmdField.value, "`/kit pvp`");
+      assert.strictEqual(embed.author.name, "SurvivorOne: /kit pvp");
+      assert.strictEqual(embed.color, 0xd41111);
     });
 
     it("should redact sensitive command arguments like /link and passwords (SEC-12)", async () => {
@@ -172,12 +160,12 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       assert.strictEqual(sentMessages.length, 3);
-      const cmd1 = sentMessages[0].embeds[0].data.fields.find((f) => f.name === "Command").value;
-      const cmd2 = sentMessages[1].embeds[0].data.fields.find((f) => f.name === "Command").value;
-      const cmd3 = sentMessages[2].embeds[0].data.fields.find((f) => f.name === "Command").value;
+      const cmd1 = sentMessages[0].embeds[0].data.author.name;
+      const cmd2 = sentMessages[1].embeds[0].data.author.name;
+      const cmd3 = sentMessages[2].embeds[0].data.author.name;
 
-      assert.strictEqual(cmd1, "`/link [REDACTED]`");
-      assert.strictEqual(cmd2, "`/login [REDACTED]`");
+      assert.ok(cmd1.endsWith("/link [REDACTED]"));
+      assert.ok(cmd2.endsWith("/login [REDACTED]"));
       assert.ok(cmd3.includes("[REDACTED]"));
       assert.ok(!cmd3.includes("d8a7f9b0c1e234567890abcdef1234"));
     });
@@ -455,9 +443,9 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       assert.strictEqual(sentMessages.length, 4);
-      assert.strictEqual(sentMessages[0].embeds[0].data.title, "🟢 Player Connected");
-      assert.strictEqual(sentMessages[1].embeds[0].data.title, "🔴 Player Disconnected");
-      assert.strictEqual(sentMessages[2].embeds[0].data.title, "⌨️ Player Command");
+      assert.strictEqual(sentMessages[0].embeds[0].data.author.name.endsWith("joined the server"), true);
+      assert.strictEqual(sentMessages[1].embeds[0].data.author.name.includes("left the server"), true);
+      assert.strictEqual(sentMessages[2].embeds[0].data.author.name.includes(": "), true);
       assert.strictEqual(sentMessages[3].embeds[0].data.title, "🔨 Moderation: WARN");
     });
   });

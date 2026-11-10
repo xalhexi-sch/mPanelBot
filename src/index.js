@@ -4,6 +4,7 @@ const { LinkRepository } = require("./database/repositories/linkRepository");
 const { DedupeRepository } = require("./database/repositories/dedupeRepository");
 const { StatsRepository } = require("./database/repositories/statsRepository");
 const { StatsService } = require("./services/statsService");
+const { SteamAvatarService } = require("./services/steamAvatar");
 const { LivePanels } = require("./discord/livePanels");
 const { GuildRepository } = require("./database/repositories/guildRepository");
 const { AuditRepository } = require("./database/repositories/auditRepository");
@@ -44,6 +45,7 @@ async function main() {
   const linkRepo = new LinkRepository(dbManager);
   const dedupeRepo = new DedupeRepository(dbManager);
   const statsRepo = new StatsRepository(dbManager);
+  const avatars = new SteamAvatarService();
   const statsService = new StatsService({ statsRepo, mysqlConfig: config.integrations.mysql });
   console.log(`[stats] Player stats source: ${statsService.source}`);
   const guildRepo = new GuildRepository(dbManager, config.network.apiKey);
@@ -132,6 +134,8 @@ async function main() {
   const discordLogger = new DiscordLogger({
     discordClient: discordBot.client,
     guildRepo,
+    avatars,
+    snapshotRepo,
   });
   discordBot.discordLogger = discordLogger;
 
@@ -143,6 +147,7 @@ async function main() {
   discordBot.raidNotifier = raidNotifier;
 
   const chatRelay = new ChatRelay({
+    avatars,
     discordClient: discordBot.client,
     wsServer,
     guildRepo,

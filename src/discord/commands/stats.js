@@ -91,7 +91,7 @@ async function handleRankingInteraction(interaction, { statsService }) {
   if (!boards.kills.length && !boards.playtime.length) {
     return interaction.editReply({ content: "No player statistics have been collected yet." });
   }
-  return interaction.editReply({ embeds: [buildLeaderboardEmbed(boards, { source: statsService.source })] });
+  return interaction.editReply({ embeds: [buildLeaderboardEmbed(boards, { iconURL: interaction.client.user?.displayAvatarURL?.() })] });
 }
 
 async function handleCompareInteraction(interaction, { statsService }) {
