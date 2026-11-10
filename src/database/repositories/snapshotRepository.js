@@ -73,6 +73,7 @@ class SnapshotRepository {
       return {
         serverId: row.server_id,
         serverName: row.server_name,
+        serverSteamId: row.server_steam_id || null,
         map: row.map,
         onlineCount: row.online_count,
         maxPlayers: row.max_players,

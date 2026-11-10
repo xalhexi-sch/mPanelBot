@@ -212,6 +212,17 @@ describe("guild repository", () => {
   });
 });
 
+describe("snapshot repository", () => {
+  it("returns the server code from both getSnapshot and getAllSnapshots", () => {
+    const db = new DatabaseManager(":memory:");
+    const repo = new SnapshotRepository(db);
+    repo.saveSnapshot("s1", { serverName: "PH", serverSteamId: "85568392935684753", map: "Washington", onlinePlayers: 1, maxPlayers: 24, players: [] });
+    assert.strictEqual(repo.getSnapshot("s1").serverSteamId, "85568392935684753");
+    assert.strictEqual(repo.getAllSnapshots()[0].serverSteamId, "85568392935684753");
+    db.close();
+  });
+});
+
 describe("status header, Play button and group fallback", () => {
   const { buildStatusComponents } = require("../src/discord/views");
   const { DiscordLogger } = require("../src/discord/logs/discordLogger");
