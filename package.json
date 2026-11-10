@@ -10,9 +10,9 @@
     "test": "node --test test/**/*.test.js"
   },
   "dependencies": {
-    "discord.js": "^14.16.3",
-    "mysql2": "^3.24.6",
-    "ws": "^8.18.0"
+    "discord.js": "14.28.1",
+    "mysql2": "3.24.6",
+    "ws": "8.22.2"
   },
   "engines": {
     "node": ">=22.0.0"

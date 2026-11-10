@@ -25,6 +25,8 @@ class GuildRepository {
     this.dbManager = dbManager;
     this.encryptionSecret = encryptionSecret;
     this.readSecrets = [encryptionSecret, ...legacySecrets].filter(Boolean);
+    // Guild settings are read on every Discord message / log / alert but change only via upsert, so cache them.
+    this._all = null;
   }
 
   /** Re-encrypts any value still protected by a legacy secret with the current one. Idempotent; call once at startup. */
@@ -40,6 +42,7 @@ class GuildRepository {
         .run(encryptText(plain, this.encryptionSecret), row.guild_id);
       migrated++;
     }
+    this._all = null;
     return migrated;
   }
 
@@ -61,6 +64,8 @@ class GuildRepository {
   }
 
   getGuildConfig(guildId) {
+    const cached = this._all?.find((c) => c.guildId === String(guildId).trim());
+    if (cached) return { ...cached, adminRoleIds: [...cached.adminRoleIds] };
     const row = this.dbManager.prepare("SELECT * FROM guild_configs WHERE guild_id = ?").get(String(guildId).trim());
     return row ? this._rowToConfig(row) : null;
   }
@@ -90,12 +95,17 @@ class GuildRepository {
          ON CONFLICT(guild_id) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(", ")}, updated_at = excluded.updated_at`
       )
       .run(gid, ...values, merged.updatedAt);
+    this._all = null; // invalidate
 
     return merged;
   }
 
   getAllGuildConfigs() {
-    return this.dbManager.prepare("SELECT * FROM guild_configs").all().map((r) => this._rowToConfig(r));
+    if (!this._all) {
+      this._all = this.dbManager.prepare("SELECT * FROM guild_configs").all().map((r) => this._rowToConfig(r));
+    }
+    // Shallow copies so callers (which sometimes annotate configs) can never corrupt the cache
+    return this._all.map((c) => ({ ...c, adminRoleIds: [...c.adminRoleIds] }));
   }
 }
 

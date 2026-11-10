@@ -112,7 +112,15 @@ class MySqlStatsSource {
 }
 
 class StatsService {
-  constructor({ statsRepo, mysqlConfig = null, mysqlModule = null, logger = console }) {
+  /**
+   * @param cacheMs how long leaderboard-style reads are reused. Many panels/commands ask for the same data, and
+   * the MySQL table only changes every few minutes, so this keeps idle load near zero.
+   */
+  constructor({ statsRepo, mysqlConfig = null, mysqlModule = null, logger = console, cacheMs = null, now = Date.now }) {
+    this.now = now;
+    this.cache = new Map(); // key -> { value, expires }
+    this.inflight = new Map();
+    this.cacheMs = cacheMs ?? (mysqlConfig?.enabled ? 60_000 : 5_000);
     this.repo = statsRepo;
     this.logger = logger;
     this.mysql = null;
@@ -124,6 +132,24 @@ class StatsService {
         this.logger.warn(`[stats] MySQL source disabled: ${err.message}`);
       }
     }
+  }
+
+  /** Serves a fresh cached value, joins an identical request already in flight, or computes and stores it. */
+  async _cached(key, compute) {
+    const hit = this.cache.get(key);
+    if (hit && hit.expires > this.now()) return hit.value;
+    if (this.inflight.has(key)) return this.inflight.get(key);
+
+    const p = Promise.resolve()
+      .then(compute)
+      .then((value) => {
+        if (this.cache.size > 200) this.cache.delete(this.cache.keys().next().value);
+        this.cache.set(key, { value, expires: this.now() + this.cacheMs });
+        return value;
+      })
+      .finally(() => this.inflight.delete(key));
+    this.inflight.set(key, p);
+    return p;
   }
 
   get source() {
@@ -185,21 +211,23 @@ class StatsService {
 
   async getTop(metric, limit = 10) {
     const m = METRICS[metric] || "kills";
-    return this._viaMysql(
+    return this._cached(`top:${m}:${limit}`, () => this._viaMysql(
       (src) => src.getTop(m, limit),
       () => (m === "playtime" ? this.repo.getTopPlaytime(limit) : m === "deaths" ? this.repo.getTopDeaths(limit) : this.repo.getTopKills(limit))
-    );
+    ));
   }
 
   /** Farm/build rankings only exist in the legacy MySQL table; returns null when MySQL is not enabled. */
   async getFarmboards(limit = 5) {
     if (!this.mysql) return null;
-    try {
-      return await this.mysql.getFarm(limit);
-    } catch (err) {
-      this.logger.warn(`[stats] MySQL farm query failed: ${err.message}`);
-      return null;
-    }
+    return this._cached(`farm:${limit}`, async () => {
+      try {
+        return await this.mysql.getFarm(limit);
+      } catch (err) {
+        this.logger.warn(`[stats] MySQL farm query failed: ${err.message}`);
+        return null;
+      }
+    });
   }
 
   async getLeaderboards(limit = 10) {
