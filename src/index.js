@@ -48,7 +48,9 @@ async function main() {
   const avatars = new SteamAvatarService();
   const statsService = new StatsService({ statsRepo, mysqlConfig: config.integrations.mysql });
   console.log(`[stats] Player stats source: ${statsService.source}`);
-  const guildRepo = new GuildRepository(dbManager, config.network.apiKey);
+  const guildRepo = new GuildRepository(dbManager, config.security.encryptionKey, [config.network.apiKey]);
+  const migrated = guildRepo.migrateEncryption();
+  if (migrated > 0) console.log("[security] Re-encrypted " + migrated + " stored secret(s) with the dedicated key.");
   const auditRepo = new AuditRepository(dbManager);
   const snapshotRepo = new SnapshotRepository(dbManager);
 
@@ -65,6 +67,9 @@ async function main() {
     apiKey: config.network.apiKey,
     heartbeatIntervalMs: config.network.heartbeatIntervalMs,
     maxPayloadSizeBytes: config.network.maxPayloadSizeBytes,
+    serverKeys: config.network.serverKeys,
+    messageRatePerSec: config.network.messageRatePerSec,
+    messageBurst: config.network.messageBurst,
   });
 
   const healthServer = createHealthServer({
@@ -180,8 +185,12 @@ async function main() {
     console.log(`[websocket] Server disconnected: ${serverId}`);
   });
 
-  wsServer.on("auth_failed", ({ remoteAddress }) => {
-    console.warn(`[websocket] Unauthorized connection attempt rejected from ${remoteAddress}`);
+  wsServer.on("auth_failed", ({ remoteAddress, blocked }) => {
+    console.warn("[websocket] Unauthorized connection attempt rejected from " + remoteAddress + (blocked ? " (address temporarily blocked)" : ""));
+  });
+
+  wsServer.on("rate_limited", ({ remoteAddress, serverId }) => {
+    console.warn("[websocket] Rate limit exceeded by " + (serverId || remoteAddress) + "; connection closed.");
   });
 
   // 8. Start HTTP / WebSocket listener

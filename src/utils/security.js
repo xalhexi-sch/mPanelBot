@@ -13,12 +13,12 @@ function redactWebhookUrl(urlOrText) {
   );
 }
 
-/**
- * Derives a deterministic 32-byte key from a secret string.
- */
+/** Derives a 32-byte key from a secret. There is deliberately NO built-in default: a missing secret is a bug. */
 function deriveKey(secret) {
-  const keyMaterial = secret || "mPanel-default-internal-storage-key-2026";
-  return crypto.createHash("sha256").update(keyMaterial).digest();
+  if (!secret || typeof secret !== "string") {
+    throw new Error("An encryption secret is required (security.encryptionKey in config.json).");
+  }
+  return crypto.createHash("sha256").update(secret).digest();
 }
 
 /**
@@ -36,34 +36,34 @@ function encryptText(plainText, secret) {
 }
 
 /**
- * Decrypts sensitive text previously encrypted with encryptText.
- * Safely falls back to plaintext if the string does not have the 'enc:' prefix.
+ * Decrypts text previously encrypted with encryptText.
+ * `secret` may be one secret or an array tried in order (current key first, then legacy keys for migration).
+ * Returns null when nothing decrypts it. Strings without the 'enc:' prefix are legacy plaintext and returned as-is.
  */
 function decryptText(cipherText, secret) {
   if (!cipherText || typeof cipherText !== "string") return null;
-  if (!cipherText.startsWith("enc:")) {
-    // Unencrypted legacy/raw fallback
-    return cipherText;
+  if (!cipherText.startsWith("enc:")) return cipherText;
+
+  const parts = cipherText.slice(4).split(":");
+  if (parts.length !== 3) return null;
+  const [ivHex, tagHex, dataHex] = parts;
+
+  for (const candidate of [].concat(secret)) {
+    try {
+      const decipher = crypto.createDecipheriv("aes-256-gcm", deriveKey(candidate), Buffer.from(ivHex, "hex"));
+      decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+      return Buffer.concat([decipher.update(Buffer.from(dataHex, "hex")), decipher.final()]).toString("utf8");
+    } catch {
+      // wrong key or tampered data: try the next candidate
+    }
   }
-  try {
-    const parts = cipherText.slice(4).split(":");
-    if (parts.length !== 3) return null;
-    const [ivHex, tagHex, dataHex] = parts;
-    const key = deriveKey(secret);
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivHex, "hex"));
-    decipher.setAuthTag(Buffer.from(tagHex, "hex"));
-    const decrypted = Buffer.concat([
-      decipher.update(Buffer.from(dataHex, "hex")),
-      decipher.final(),
-    ]);
-    return decrypted.toString("utf8");
-  } catch {
-    return null;
-  }
+  return null;
 }
 
-module.exports = {
-  redactWebhookUrl,
-  encryptText,
-  decryptText,
-};
+/** True when `cipherText` decrypts with the FIRST (current) secret, i.e. needs no migration. */
+function isEncryptedWith(cipherText, secret) {
+  if (typeof cipherText !== "string" || !cipherText.startsWith("enc:")) return false;
+  return decryptText(cipherText, [secret]) !== null;
+}
+
+module.exports = { redactWebhookUrl, encryptText, decryptText, isEncryptedWith };

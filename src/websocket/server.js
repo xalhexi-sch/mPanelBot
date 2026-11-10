@@ -8,15 +8,34 @@ const {
   createWelcome,
   createEnvelope,
 } = require("./protocol");
+const { AuthThrottle, TokenBucket } = require("./threatGuard");
+
+const SERVER_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+
+/** Constant-time comparison that does not leak the secret's length (both sides are hashed first). */
+function safeEqual(a, b) {
+  const ha = crypto.createHash("sha256").update(String(a)).digest();
+  const hb = crypto.createHash("sha256").update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
 
 class GameWebSocketServer extends EventEmitter {
   constructor({
     apiKey,
     heartbeatIntervalMs = 30000,
     maxPayloadSizeBytes = 262144,
+    serverKeys = {},
+    messageRatePerSec = 40,
+    messageBurst = 200,
+    authThrottle = new AuthThrottle(),
   }) {
     super();
     this.apiKey = String(apiKey || "");
+    // Optional dedicated key per ServerId. When a server has one, the shared key can no longer impersonate it.
+    this.serverKeys = new Map(Object.entries(serverKeys || {}).filter(([id, k]) => SERVER_ID_PATTERN.test(id) && k));
+    this.messageRatePerSec = messageRatePerSec;
+    this.messageBurst = messageBurst;
+    this.authThrottle = authThrottle;
     this.heartbeatIntervalMs = heartbeatIntervalMs;
     this.maxPayloadSizeBytes = maxPayloadSizeBytes;
 
@@ -25,42 +44,50 @@ class GameWebSocketServer extends EventEmitter {
     this.heartbeatTimer = null;
   }
 
+  /**
+   * @returns {{ok:boolean, keyServerId:string|null}} keyServerId is set when a per-server key matched.
+   * Every candidate is compared (no early exit) so timing does not reveal which key was close.
+   */
+  authenticate(headerValue) {
+    if (!headerValue || typeof headerValue !== "string") return { ok: false, keyServerId: null };
+    const provided = (headerValue.startsWith("Bearer ") ? headerValue.slice(7) : headerValue).trim();
+    if (!provided) return { ok: false, keyServerId: null };
+
+    let result = { ok: false, keyServerId: null };
+    if (this.apiKey && safeEqual(provided, this.apiKey)) result = { ok: true, keyServerId: null };
+    for (const [serverId, key] of this.serverKeys) {
+      if (safeEqual(provided, key) && !result.ok) result = { ok: true, keyServerId: serverId };
+    }
+    return result;
+  }
+
   isAuthorizedHeader(headerValue) {
-    if (!headerValue || !this.apiKey) return false;
-
-    let providedKey = "";
-    if (headerValue.startsWith("Bearer ")) {
-      providedKey = headerValue.slice(7).trim();
-    } else {
-      providedKey = headerValue.trim();
-    }
-
-    if (!providedKey) return false;
-
-    const keyBuf = Buffer.from(this.apiKey, "utf8");
-    const provBuf = Buffer.from(providedKey, "utf8");
-
-    if (keyBuf.length !== provBuf.length) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(keyBuf, provBuf);
+    return this.authenticate(headerValue).ok;
   }
 
   handleUpgrade(req, socket, head) {
-    const authHeader = req.headers["authorization"] || req.headers["x-api-key"];
+    const address = socket.remoteAddress || "unknown";
 
-    if (!this.isAuthorizedHeader(authHeader)) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+    const blockedMs = this.authThrottle.blockedFor(address);
+    if (blockedMs > 0) {
+      socket.write("HTTP/1.1 429 Too Many Requests\r\nRetry-After: " + Math.ceil(blockedMs / 1000) + "\r\nConnection: close\r\n\r\n");
       socket.destroy();
-      this.emit("auth_failed", {
-        remoteAddress: socket.remoteAddress,
-        url: req.url,
-      });
       return;
     }
 
+    const auth = this.authenticate(req.headers["authorization"] || req.headers["x-api-key"]);
+
+    if (!auth.ok) {
+      const nowBlocked = this.authThrottle.recordFailure(address);
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      this.emit("auth_failed", { remoteAddress: address, url: req.url, blocked: nowBlocked });
+      return;
+    }
+
+    this.authThrottle.recordSuccess(address);
     this.wss.handleUpgrade(req, socket, head, (ws) => {
+      req.keyServerId = auth.keyServerId;
       this.wss.emit("connection", ws, req);
     });
   }
@@ -91,6 +118,7 @@ class GameWebSocketServer extends EventEmitter {
   handleConnection(ws, req) {
     const remoteAddress = req.socket.remoteAddress;
     let establishedSession = null;
+    const bucket = new TokenBucket({ ratePerSec: this.messageRatePerSec, burst: this.messageBurst });
 
     // Must receive a valid 'hello' within 10 seconds
     const helloTimeout = setTimeout(() => {
@@ -102,6 +130,14 @@ class GameWebSocketServer extends EventEmitter {
     }, 10000);
 
     ws.on("message", (raw) => {
+      if (!bucket.take()) {
+        this.emit("rate_limited", { remoteAddress, serverId: establishedSession?.serverId || null });
+        try {
+          ws.close(4008, "Rate limit exceeded");
+        } catch {}
+        return;
+      }
+
       let parsed;
       try {
         parsed = JSON.parse(raw.toString("utf8"));
@@ -140,6 +176,17 @@ class GameWebSocketServer extends EventEmitter {
         clearTimeout(helloTimeout);
         const serverId = parsed.serverId.trim();
         const payload = parsed.payload || {};
+
+        // Identity rules: well-formed id, and a per-server key may only speak for its own server.
+        const dedicated = this.serverKeys.get(serverId);
+        const keyBelongsElsewhere = req.keyServerId && req.keyServerId !== serverId;
+        const sharedKeyOnProtectedServer = dedicated && !req.keyServerId;
+        if (!SERVER_ID_PATTERN.test(serverId) || keyBelongsElsewhere || sharedKeyOnProtectedServer) {
+          this.authThrottle.recordFailure(remoteAddress);
+          this.emit("auth_failed", { remoteAddress, url: "hello", blocked: false });
+          ws.close(4005, "Not authorised for this server id");
+          return;
+        }
 
         // Replace any existing session with this serverId
         const existing = this.sessions.get(serverId);

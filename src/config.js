@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, "../config.json");
 
@@ -28,6 +29,40 @@ function loadMysqlConfig(m = {}) {
       barricades: c.barricades || "Barricades",
     },
   };
+}
+
+/**
+ * Makes sure config.json holds a dedicated encryption key (separate from the network API key, so rotating the
+ * API key never locks the bot out of its own stored secrets). Generated once, written back with 0600 permissions.
+ */
+function ensureEncryptionKey(configPath, parsed) {
+  const existing = parsed?.security?.encryptionKey;
+  if (typeof existing === "string" && existing.length >= 32) return existing;
+  if (!parsed) return null; // env-only deployments must supply the key themselves
+
+  const key = crypto.randomBytes(32).toString("hex");
+  parsed.security = { ...(parsed.security || {}), encryptionKey: key };
+  const tmp = configPath + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, configPath);
+  console.log("[config] Generated a dedicated encryption key for stored secrets.");
+  return key;
+}
+
+/** Warns when config.json (tokens/passwords) is readable by other users on this machine. */
+function warnIfConfigExposed(configPath) {
+  try {
+    if (process.platform === "win32") return;
+    if (fs.statSync(configPath).mode & 0o077) console.warn("[config] " + configPath + " is readable by other users. Run: chmod 600 " + configPath);
+  } catch {}
+}
+
+function loadServerKeys(raw) {
+  const out = {};
+  for (const [id, key] of Object.entries(raw || {})) {
+    if (/^[A-Za-z0-9._-]{1,64}$/.test(id) && typeof key === "string" && key.trim().length >= 24) out[id] = key.trim();
+  }
+  return out;
 }
 
 function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
@@ -68,7 +103,14 @@ function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
     throw new Error("Missing or invalid API key in configuration.");
   }
 
+  const encryptionKey = ensureEncryptionKey(configPath, parsed) || process.env.MPANEL_ENCRYPTION_KEY || null;
+  if (!encryptionKey) {
+    throw new Error("Missing security.encryptionKey in configuration (generated automatically when config.json exists).");
+  }
+  if (configExists) warnIfConfigExposed(configPath);
+
   return {
+    security: { encryptionKey },
     discord: {
       token,
       clientId: (parsed?.discord?.clientId || process.env.DISCORD_CLIENT_ID || process.env.CLIENT_ID)
@@ -81,6 +123,9 @@ function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
       apiKey,
       heartbeatIntervalMs: Number(parsed?.network?.heartbeatIntervalMs || 30000),
       maxPayloadSizeBytes: Number(parsed?.network?.maxPayloadSizeBytes || 262144),
+      serverKeys: loadServerKeys(parsed?.network?.serverKeys),
+      messageRatePerSec: Number(parsed?.network?.messageRatePerSec || 40),
+      messageBurst: Number(parsed?.network?.messageBurst || 200),
     },
     storage: {
       sqlitePath: process.env.SQLITE_PATH || parsed?.storage?.sqlitePath || "./data/mpanel.sqlite",

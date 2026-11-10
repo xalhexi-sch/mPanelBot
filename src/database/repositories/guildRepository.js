@@ -1,4 +1,4 @@
-const { encryptText, decryptText } = require("../../utils/security");
+const { encryptText, decryptText, isEncryptedWith } = require("../../utils/security");
 
 // camelCase field -> SQLite column. Single source of truth so adding a setting is a one-line change.
 const FIELD_COLUMNS = {
@@ -17,9 +17,30 @@ const FIELD_COLUMNS = {
 };
 
 class GuildRepository {
-  constructor(dbManager, encryptionSecret = null) {
+  /**
+   * @param encryptionSecret current secret used to encrypt
+   * @param legacySecrets older secrets that may still protect stored values (e.g. the API key used before a dedicated key existed)
+   */
+  constructor(dbManager, encryptionSecret, legacySecrets = []) {
     this.dbManager = dbManager;
     this.encryptionSecret = encryptionSecret;
+    this.readSecrets = [encryptionSecret, ...legacySecrets].filter(Boolean);
+  }
+
+  /** Re-encrypts any value still protected by a legacy secret with the current one. Idempotent; call once at startup. */
+  migrateEncryption() {
+    let migrated = 0;
+    const rows = this.dbManager.prepare("SELECT guild_id, chat_webhook_url FROM guild_configs WHERE chat_webhook_url IS NOT NULL").all();
+    for (const row of rows) {
+      if (isEncryptedWith(row.chat_webhook_url, this.encryptionSecret)) continue;
+      const plain = decryptText(row.chat_webhook_url, this.readSecrets);
+      if (!plain) continue;
+      this.dbManager
+        .prepare("UPDATE guild_configs SET chat_webhook_url = ? WHERE guild_id = ?")
+        .run(encryptText(plain, this.encryptionSecret), row.guild_id);
+      migrated++;
+    }
+    return migrated;
   }
 
   _rowToConfig(row) {
@@ -33,7 +54,7 @@ class GuildRepository {
     for (const [field, col] of Object.entries(FIELD_COLUMNS)) {
       if (field === "adminRoleIds") continue;
       cfg[field] = field === "chatWebhookUrl"
-        ? decryptText(row[col], this.encryptionSecret) || null
+        ? decryptText(row[col], this.readSecrets) || null
         : row[col] || null;
     }
     return cfg;
