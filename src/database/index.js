@@ -41,6 +41,10 @@ class DatabaseManager {
         if (have.size > 0 && !have.has(col)) this.db.exec(`ALTER TABLE guild_configs ADD COLUMN ${col} TEXT;`);
       }
     } catch {}
+    try {
+      const cols = this.db.prepare("PRAGMA table_info(server_snapshots);").all().map((c) => c.name);
+      if (cols.length > 0 && !cols.includes("server_steam_id")) this.db.exec("ALTER TABLE server_snapshots ADD COLUMN server_steam_id TEXT;");
+    } catch {}
   }
 
   exec(sql) {

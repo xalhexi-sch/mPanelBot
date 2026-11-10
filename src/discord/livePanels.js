@@ -3,7 +3,7 @@
  * Channel/message IDs live in SQLite guild config (`/setup panels`). If an admin deletes the message
  * the panel simply posts a fresh one. Unchanged content is never re-sent, which keeps us far from rate limits.
  */
-const { buildStatusEmbeds, buildLeaderboardEmbed } = require("./views");
+const { buildStatusEmbeds, buildStatusComponents, buildLeaderboardEmbed } = require("./views");
 
 class LivePanels {
   constructor({ client, guildRepo, snapshotRepo, statsService, wsServer, statusSeconds = 30, leaderboardSeconds = 60, logger = console }) {
@@ -53,8 +53,9 @@ class LivePanels {
   async buildPayload(kind) {
     if (kind === "status") {
       const active = new Set((this.wsServer?.getActiveSessions() || []).map((s) => s.serverId));
-      const embeds = buildStatusEmbeds(this.snapshotRepo.getAllSnapshots(), active, { page: this.tick });
-      return { content: "", embeds: embeds.map((e) => e.toJSON()) };
+      const snaps = this.snapshotRepo.getAllSnapshots();
+      const embeds = buildStatusEmbeds(snaps, active, { page: this.tick });
+      return { content: "", embeds: embeds.map((e) => e.toJSON()), components: buildStatusComponents(snaps, active).map((r) => r.toJSON()) };
     }
     const boards = await this.statsService.getLeaderboards(10);
     return { content: "", embeds: [buildLeaderboardEmbed(boards, { iconURL: this.client.user?.displayAvatarURL?.() }).toJSON()] };

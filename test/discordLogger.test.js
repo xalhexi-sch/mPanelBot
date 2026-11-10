@@ -58,6 +58,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });
@@ -88,6 +89,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });
@@ -115,6 +117,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });
@@ -138,6 +141,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });
@@ -192,6 +196,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });
@@ -227,6 +232,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });
@@ -254,6 +260,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });
@@ -281,6 +288,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       };
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: clientWithoutGuild,
         guildRepo,
       });
@@ -298,6 +306,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });
@@ -324,6 +333,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });
@@ -352,6 +362,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });
@@ -382,6 +393,7 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       const logger = new DiscordLogger({
+        groupWaitMs: 0,
         discordClient: fakeClient,
         guildRepo,
       });

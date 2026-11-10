@@ -2,7 +2,7 @@
  * Embed builders shared by slash commands and the auto-updating panels.
  * Pure functions (no Discord I/O) so they are cheap to unit test.
  */
-const { EmbedBuilder } = require("discord.js");
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 
 const BRAND_COLOR = 0xd41111;
 const OFFLINE_COLOR = 0x4f545c;
@@ -60,7 +60,7 @@ function buildServerStatusEmbed(snap, { online = true, page = 0, perPage = 9 } =
 
   const embed = new EmbedBuilder()
     .setColor(online ? BRAND_COLOR : OFFLINE_COLOR)
-    .setTitle(`${online ? "🟢" : "🔴"} ${snap.serverName || snap.serverId}`);
+    .setTitle(String(snap.serverName || snap.serverId));
 
   if (!online) {
     const ts = snap.updatedAtUtc ? Math.floor(new Date(snap.updatedAtUtc).getTime() / 1000) : null;
@@ -68,7 +68,7 @@ function buildServerStatusEmbed(snap, { online = true, page = 0, perPage = 9 } =
     return embed;
   }
 
-  embed.setDescription(`> **${snap.map || "Unknown map"} ◾️ 👥 ${count}/${snap.maxPlayers || 0}**`);
+  embed.setDescription(`> **${[snap.serverSteamId, snap.map || "Unknown map"].filter(Boolean).join(" ◾️ ")} ◾️ 👥 ${count}/${snap.maxPlayers || 0}**`);
 
   if (slice.length) {
     for (const p of slice) {
@@ -89,8 +89,8 @@ function buildServerStatusEmbed(snap, { online = true, page = 0, perPage = 9 } =
     });
   }
 
+  if (pages > 1) embed.setFooter({ text: `Page ${cur + 1}/${pages}` });
   embed
-    .setFooter({ text: pages > 1 ? `Page ${cur + 1}/${pages} • mPanel` : "mPanel Live Status" })
     .setTimestamp(snap.updatedAtUtc ? new Date(snap.updatedAtUtc) : new Date());
   return embed;
 }
@@ -101,6 +101,20 @@ function embedLength(e) {
   let n = (j.title || "").length + (j.description || "").length + (j.footer?.text || "").length + (j.author?.name || "").length;
   for (const f of j.fields || []) n += (f.name || "").length + (f.value || "").length;
   return n;
+}
+
+/** Old status "Play" link buttons (one per server that reports its server code). Max 5 per row, 1 row here. */
+function buildStatusComponents(snapshots, activeIds) {
+  const buttons = snapshots
+    .filter((s) => s.serverSteamId && activeIds.has(s.serverId))
+    .slice(0, 5)
+    .map((s, _i, all) =>
+      new ButtonBuilder()
+        .setLabel(all.length > 1 ? `Play ${String(s.serverName || s.serverId).slice(0, 30)}` : "Play")
+        .setStyle(ButtonStyle.Link)
+        .setURL(`https://join.unbeaten.gg/${s.serverSteamId}`)
+    );
+  return buttons.length ? [new ActionRowBuilder().addComponents(buttons)] : [];
 }
 
 const MESSAGE_EMBED_BUDGET = 5600; // safety margin under Discord's 6000
@@ -223,6 +237,7 @@ module.exports = {
   kdr,
   buildServerStatusEmbed,
   buildStatusEmbeds,
+  buildStatusComponents,
   embedLength,
   MESSAGE_EMBED_BUDGET,
   buildLeaderboardEmbed,

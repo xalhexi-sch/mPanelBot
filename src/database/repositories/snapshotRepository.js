@@ -13,10 +13,11 @@ class SnapshotRepository {
     const nowIso = new Date().toISOString();
 
     const stmt = this.dbManager.prepare(`
-      INSERT INTO server_snapshots (server_id, server_name, map, online_count, max_players, players_json, updated_at_utc)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO server_snapshots (server_id, server_name, server_steam_id, map, online_count, max_players, players_json, updated_at_utc)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(server_id) DO UPDATE SET
         server_name = excluded.server_name,
+        server_steam_id = excluded.server_steam_id,
         map = excluded.map,
         online_count = excluded.online_count,
         max_players = excluded.max_players,
@@ -24,11 +25,12 @@ class SnapshotRepository {
         updated_at_utc = excluded.updated_at_utc
     `);
 
-    stmt.run(sid, serverName, map, onlineCount, maxPlayers, playersJson, nowIso);
+    stmt.run(sid, serverName, String(snapshot.serverSteamId || "") || null, map, onlineCount, maxPlayers, playersJson, nowIso);
 
     return {
       serverId: sid,
       serverName,
+      serverSteamId: String(snapshot.serverSteamId || "") || null,
       map,
       onlineCount,
       maxPlayers,
@@ -51,6 +53,7 @@ class SnapshotRepository {
     return {
       serverId: row.server_id,
       serverName: row.server_name,
+      serverSteamId: row.server_steam_id || null,
       map: row.map,
       onlineCount: row.online_count,
       maxPlayers: row.max_players,

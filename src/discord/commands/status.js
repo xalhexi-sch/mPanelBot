@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
-const { buildStatusEmbeds, BRAND_COLOR } = require("../views");
+const { buildStatusEmbeds, buildStatusComponents, BRAND_COLOR } = require("../views");
 
 function buildStatusCommand() {
   return new SlashCommandBuilder()
@@ -31,7 +31,7 @@ async function handleStatusInteraction(interaction, { snapshotRepo, wsServer }) 
     });
   }
 
-  return interaction.reply({ embeds: buildStatusEmbeds(snapshots, activeIds) });
+  return interaction.reply({ embeds: buildStatusEmbeds(snapshots, activeIds), components: buildStatusComponents(snapshots, activeIds) });
 }
 
 module.exports = { buildStatusCommand, handleStatusInteraction };

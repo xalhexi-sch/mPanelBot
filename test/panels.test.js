@@ -28,14 +28,16 @@ describe("views", () => {
       { serverId: "s1", serverName: "One", map: "PEI", onlinePlayers: 4, maxPlayers: 24, players: Array.from({ length: 4 }, (_, i) => ({ steamId: `7656119800000000${i}`, playerName: `P${i}`, pingMs: 10, sessionDurationSeconds: i * 60 })) },
       { online: true }
     ).toJSON();
-    assert.match(e.title, /🟢 One/);
+    assert.strictEqual(e.title, "One");
     assert.strictEqual(e.fields.length % 3, 0);
     assert.ok(e.description.includes("4/24"));
+    assert.ok(!e.footer, "no 'mPanel' footer text on a single page");
   });
 
   it("renders an offline server greyed out", () => {
     const e = buildServerStatusEmbed({ serverId: "s1", serverName: "One", updatedAtUtc: new Date().toISOString() }, { online: false }).toJSON();
-    assert.match(e.title, /🔴/);
+    assert.strictEqual(e.title, "One");
+    assert.strictEqual(e.color, 0x4f545c);
     assert.match(e.description, /Offline/);
   });
 
@@ -207,6 +209,35 @@ describe("guild repository", () => {
     repo.upsertGuildConfig("g", { leaderboardChannelId: "11" });
     assert.strictEqual(repo.getGuildConfig("g").statusChannelId, "10");
     db.close();
+  });
+});
+
+describe("status header, Play button and group fallback", () => {
+  const { buildStatusComponents } = require("../src/discord/views");
+  const { DiscordLogger } = require("../src/discord/logs/discordLogger");
+
+  it("shows the server code in the header and a Play link button", () => {
+    const snap = { serverId: "s1", serverName: "PH", serverSteamId: "85568392935684753", map: "Washington", onlinePlayers: 1, maxPlayers: 24, players: [] };
+    const e = buildServerStatusEmbed(snap, { online: true }).toJSON();
+    assert.strictEqual(e.description, "> **85568392935684753 ◾️ Washington ◾️ 👥 1/24**");
+    const rows = buildStatusComponents([snap], new Set(["s1"]));
+    assert.strictEqual(rows[0].toJSON().components[0].url, "https://join.unbeaten.gg/85568392935684753");
+    assert.deepStrictEqual(buildStatusComponents([snap], new Set()), [], "no button for an offline server");
+  });
+
+  it("uses the group id from the status snapshot when the join event carries none", async () => {
+    const sent = [];
+    const channel = { isTextBased: () => true, send: async (p) => sent.push(p) };
+    const logger = new DiscordLogger({
+      discordClient: { guilds: { cache: new Map([["g", { channels: { cache: new Map([["c", channel]]) } }]]) } },
+      guildRepo: { getAllGuildConfigs: () => [{ guildId: "g", joinLeaveChannelId: "c" }] },
+      avatars: { getProfile: async () => ({}), getGroup: async (id) => (id === "103582791475043382" ? { name: "!UTD!", url: "https://steamcommunity.com/groups/UTDONTOP" } : null) },
+      groupWaitMs: 0,
+    });
+    logger.rememberGroups([{ steamId: "76561199246661188", groupId: "103582791475043382" }]);
+    await logger.logPlayerConnected({ serverId: "s", steamId: "76561199246661188", playerName: "ec" });
+    const f = Object.fromEntries(sent[0].embeds[0].toJSON().fields.map((x) => [x.name, x.value]));
+    assert.strictEqual(f.Group, "[!UTD!](https://steamcommunity.com/groups/UTDONTOP)");
   });
 });
 

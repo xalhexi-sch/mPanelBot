@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS server_snapshots (
     server_id TEXT PRIMARY KEY,
     server_name TEXT,
     map TEXT,
+    server_steam_id TEXT,
     online_count INTEGER NOT NULL DEFAULT 0,
     max_players INTEGER NOT NULL DEFAULT 0,
     players_json TEXT,

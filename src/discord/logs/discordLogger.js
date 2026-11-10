@@ -41,12 +41,31 @@ function formatPlayer(name, steamId) {
 }
 
 class DiscordLogger {
-  constructor({ discordClient, guildRepo, avatars = null, snapshotRepo = null, linkRepo = null } = {}) {
+  constructor({ discordClient, guildRepo, avatars = null, snapshotRepo = null, linkRepo = null, groupWaitMs = 6000 } = {}) {
+    this.groupWaitMs = groupWaitMs;
     this.linkRepo = linkRepo;
     this.client = discordClient;
     this.guildRepo = guildRepo;
     this.avatars = avatars;
     this.snapshotRepo = snapshotRepo;
+    this.groupBySteam = new Map();
+  }
+
+  /** Remember each online player's group id from the newest status snapshot (game's server.json knows it even when the join event does not). */
+  rememberGroups(players) {
+    for (const p of Array.isArray(players) ? players : []) {
+      if (p?.steamId && p.groupId) this.groupBySteam.set(String(p.steamId), String(p.groupId));
+    }
+    if (this.groupBySteam.size > 5000) this.groupBySteam.delete(this.groupBySteam.keys().next().value);
+  }
+
+  async _groupIdFor(steamId, waitMs = 0) {
+    const deadline = Date.now() + waitMs;
+    for (;;) {
+      const id = this.groupBySteam.get(String(steamId));
+      if (id || Date.now() >= deadline) return id || null;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
   }
 
   /** Human server name (from the live snapshot) falling back to the server id. */
@@ -136,14 +155,21 @@ class DiscordLogger {
 
     // Group: plugin sends {kind,id,name,url}; resolve a nicer Steam group name when we only have the gid
     let groupText = "None";
-    if (group && (group.name || group.id)) {
-      let name = group.name;
-      let url = group.url;
-      if (this.avatars && group.id && (!name || name === group.id)) {
-        const g = await this.avatars.getGroup(group.id).catch(() => null);
+    let g0 = group && (group.name || group.id) ? group : null;
+    if (!g0 && steamId) {
+      // The join event has no group; the status snapshot may need a few seconds to include a brand-new player
+      const gid = await this._groupIdFor(steamId, kind === "join" ? this.groupWaitMs : 0);
+      if (gid && gid !== "0") g0 = { kind: "steam", id: gid };
+    }
+    if (g0) {
+      const group2 = g0;
+      let name = group2.name;
+      let url = group2.url;
+      if (this.avatars && group2.id && (!name || name === group2.id)) {
+        const g = await this.avatars.getGroup(group2.id).catch(() => null);
         if (g) ({ name, url } = g);
       }
-      const label = String(name || group.id).replace(/[\[\]()*_`~|>]/g, "").slice(0, 64);
+      const label = String(name || group2.id).replace(/[\[\]()*_`~|>]/g, "").slice(0, 64);
       groupText = url ? `[${label}](${url})` : label;
     }
 

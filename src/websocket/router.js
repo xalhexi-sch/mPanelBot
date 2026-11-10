@@ -57,6 +57,7 @@ class MessageRouter {
           console.warn(`[router] server.snapshot from ${serverId} has no serverName; payload keys: ${Object.keys(payload).join(",") || "(none)"}`);
         }
         this.snapshotRepo.saveSnapshot(serverId, payload);
+        this.discordLogger?.rememberGroups?.(payload.players);
         if (this.discordClient) {
           this.discordClient.updatePresence();
         }
