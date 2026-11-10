@@ -6,6 +6,8 @@ const {
   buildLeaderboardEmbed,
   buildSingleBoardEmbed,
   buildPlayerStatsEmbed,
+  buildFarmbotsEmbed,
+  formatLong,
   trimName,
 } = require("../views");
 
@@ -39,6 +41,19 @@ function buildRankingCommand() {
           { name: "Deaths", value: "deaths" }
         )
     );
+}
+
+function buildFarmbotsCommand() {
+  return new SlashCommandBuilder().setName("farmbots").setDescription("Most zombie kills, most built and most farmed resources");
+}
+
+async function handleFarmbotsInteraction(interaction, { statsService }) {
+  await interaction.deferReply();
+  const data = await statsService.getFarmboards(5);
+  if (!data) {
+    return interaction.editReply({ content: "⚠️ Farm rankings need the MySQL stats source (`integrations.mysql`) — it isn't enabled or reachable." });
+  }
+  return interaction.editReply({ embeds: [buildFarmbotsEmbed(data)] });
 }
 
 function buildCompareCommand() {
@@ -109,26 +124,39 @@ async function handleCompareInteraction(interaction, { statsService }) {
     });
   }
 
-  const col = (s, o) => {
-    const win = (x, y, higherBetter = true) => (x === y ? "" : (x > y) === higherBetter ? " 🏆" : "");
-    return (
-      `⚔️ Kills: **${s.kills}**${win(s.kills, o.kills)}\n` +
-      `💀 Deaths: **${s.deaths}**${win(s.deaths, o.deaths, false)}\n` +
-      `📈 KDR: **${kdr(s.kills, s.deaths)}**${win(+kdr(s.kills, s.deaths), +kdr(o.kills, o.deaths))}\n` +
-      `🎯 Headshots: **${s.headshots}**${win(s.headshots, o.headshots)}\n` +
-      `⏳ Playtime: **${formatDuration(s.playtimeSeconds)}**${win(s.playtimeSeconds, o.playtimeSeconds)}`
-    );
-  };
+  const hs = (p) => (p.kills > 0 ? ((p.headshots / p.kills) * 100).toFixed(1) : "0.0");
+  const cell = (v) => String(v).padEnd(12);
+  const table =
+    "```" +
+    `Metric       | ${trimName(ra.playerName, 12).padEnd(12)} | ${trimName(rb.playerName, 12).padEnd(12)}
+` +
+    `-------------|--------------|--------------
+` +
+    `Kills        | ${cell(ra.kills)} | ${cell(rb.kills)}
+` +
+    `Deaths       | ${cell(ra.deaths)} | ${cell(rb.deaths)}
+` +
+    `KDR          | ${cell(kdr(ra.kills, ra.deaths))} | ${cell(kdr(rb.kills, rb.deaths))}
+` +
+    `Headshots    | ${cell(ra.headshots)} | ${cell(rb.headshots)}
+` +
+    `HS%          | ${cell(hs(ra) + "%")} | ${cell(hs(rb) + "%")}
+` +
+    `Playtime     | ${cell(formatLong(ra.playtimeSeconds))} | ${cell(formatLong(rb.playtimeSeconds))}
+` +
+    "```";
 
   const embed = new EmbedBuilder()
     .setColor(BRAND_COLOR)
     .setTitle("⚔️ Player Comparison")
-    .addFields(
-      { name: trimName(ra.playerName, 24), value: col(ra, rb), inline: true },
-      { name: trimName(rb.playerName, 24), value: col(rb, ra), inline: true }
+    .setDescription(
+      `A: **[${trimName(ra.playerName, 32)}](https://steamcommunity.com/profiles/${ra.steamId})**
+` +
+        `B: **[${trimName(rb.playerName, 32)}](https://steamcommunity.com/profiles/${rb.steamId})**
+
+${table}`
     )
-    .setFooter({ text: "mPanel Player Stats" })
-    .setTimestamp();
+    .setFooter({ text: "Use /stats for full details" });
   return interaction.editReply({ embeds: [embed] });
 }
 
@@ -136,6 +164,8 @@ module.exports = {
   buildStatsCommand,
   buildRankingCommand,
   buildCompareCommand,
+  buildFarmbotsCommand,
+  handleFarmbotsInteraction,
   handleStatsInteraction,
   handleRankingInteraction,
   handleCompareInteraction,

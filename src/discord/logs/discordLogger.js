@@ -41,7 +41,8 @@ function formatPlayer(name, steamId) {
 }
 
 class DiscordLogger {
-  constructor({ discordClient, guildRepo, avatars = null, snapshotRepo = null } = {}) {
+  constructor({ discordClient, guildRepo, avatars = null, snapshotRepo = null, linkRepo = null } = {}) {
+    this.linkRepo = linkRepo;
     this.client = discordClient;
     this.guildRepo = guildRepo;
     this.avatars = avatars;
@@ -128,11 +129,53 @@ class DiscordLogger {
     }
   }
 
+  /** Old Blood Horizon "Player Joined / Player Left" card: avatar thumbnail, Discord link, Steam group, account age. */
+  async _joinLeaveEmbed(kind, data) {
+    const { serverId, steamId, playerName, group } = data;
+    const profile = this.avatars && steamId ? await this.avatars.getProfile(steamId) : { avatarUrl: null, createdUnix: null };
+
+    // Group: plugin sends {kind,id,name,url}; resolve a nicer Steam group name when we only have the gid
+    let groupText = "None";
+    if (group && (group.name || group.id)) {
+      let name = group.name;
+      let url = group.url;
+      if (this.avatars && group.id && (!name || name === group.id)) {
+        const g = await this.avatars.getGroup(group.id).catch(() => null);
+        if (g) ({ name, url } = g);
+      }
+      const label = String(name || group.id).replace(/[\[\]()*_`~|>]/g, "").slice(0, 64);
+      groupText = url ? `[${label}](${url})` : label;
+    }
+
+    let discordText = "Unlinked";
+    try {
+      const link = steamId && this.linkRepo ? this.linkRepo.getLinkBySteam(String(steamId)) : null;
+      if (link?.discord_id) discordText = `<@${link.discord_id}>`;
+    } catch {}
+
+    const joined = kind === "join";
+    const duration = data.durationSeconds ?? data.sessionLengthSeconds;
+    const embed = new EmbedBuilder()
+      .setTitle(joined ? "Player Joined" : "Player Left")
+      .setColor(joined ? 0x57f287 : 0xed4245)
+      .setFooter({ text: this._serverLabel(serverId) })
+      .setTimestamp()
+      .addFields(
+        { name: "Player", value: formatPlayer(playerName, steamId), inline: true },
+        { name: "Steam ID", value: steamId ? `\`${steamId}\`` : "Unknown", inline: true },
+        { name: "Discord", value: discordText, inline: true },
+        { name: "Group", value: groupText, inline: true },
+        joined
+          ? { name: "Created", value: profile.createdUnix ? `<t:${profile.createdUnix}:R>` : "Unknown / private profile", inline: true }
+          : { name: "Session Time", value: duration != null ? formatDuration(duration) : "Unknown", inline: true }
+      );
+    if (profile.avatarUrl) embed.setThumbnail(profile.avatarUrl);
+    return embed;
+  }
+
   async logPlayerConnected(data = {}) {
     try {
-      const { serverId, steamId, playerName } = data || {};
-      const embed = await this._playerLine({ color: 0x57f287, steamId, playerName, text: "joined the server", serverId });
-      await this._broadcastToChannel("joinLeaveChannelId", embed);
+      await this._broadcastToChannel("joinLeaveChannelId", await this._joinLeaveEmbed("join", data || {}));
     } catch (err) {
       console.warn(`[discordLogger] Unexpected error in logPlayerConnected: ${err.message}`);
     }
@@ -140,11 +183,7 @@ class DiscordLogger {
 
   async logPlayerDisconnected(data = {}) {
     try {
-      const { serverId, steamId, playerName, durationSeconds, sessionLengthSeconds } = data || {};
-      const duration = durationSeconds !== undefined ? durationSeconds : sessionLengthSeconds;
-      const text = duration != null ? `left the server (played ${formatDuration(duration)})` : "left the server";
-      const embed = await this._playerLine({ color: 0xd41111, steamId, playerName, text, serverId });
-      await this._broadcastToChannel("joinLeaveChannelId", embed);
+      await this._broadcastToChannel("joinLeaveChannelId", await this._joinLeaveEmbed("leave", data || {}));
     } catch (err) {
       console.warn(`[discordLogger] Unexpected error in logPlayerDisconnected: ${err.message}`);
     }

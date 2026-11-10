@@ -21,6 +21,11 @@ function loadMysqlConfig(m = {}) {
       headshots: c.headshots || "Headshots",
       deaths: c.deaths || "PVPDeaths",
       playtime: c.playtime || "Playtime",
+      zombies: c.zombies || "Zombies",
+      megaZombies: c.megaZombies || "MegaZombies",
+      resources: c.resources || "Resources",
+      structures: c.structures || "Structures",
+      barricades: c.barricades || "Barricades",
     },
   };
 }

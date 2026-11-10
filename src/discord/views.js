@@ -156,6 +156,32 @@ function buildLeaderboardEmbed({ kills, playtime, deaths }, { iconURL = null, ti
   return embed.setTimestamp();
 }
 
+/** Old /farmbots layout: three columns (farmers / builders / gatherers), one row per rank. */
+function buildFarmbotsEmbed({ farmers, builders, gatherers }) {
+  const e = new EmbedBuilder()
+    .setColor(BRAND_COLOR)
+    .setTitle("🤖 FarmBots — Server Activity Rankings")
+    .setDescription("Top farmers (Zombies + MegaZombies), top builders (Structures + Barricades), and top gatherers (Resources).")
+    .addFields(
+      { name: "__Top Farmers__", value: ZWS, inline: true },
+      { name: "__Top Builders__", value: ZWS, inline: true },
+      { name: "__Top Gatherers__", value: ZWS, inline: true }
+    );
+  const head = (r, i) => `> ${rankMedal(i)} **${nameLink(r.name, r.steamId, 14)}**`;
+  for (let i = 0; i < BOARD_SIZE; i++) {
+    const f = farmers[i], b = builders[i], g = gatherers[i];
+    e.addFields(
+      { name: ZWS, value: f ? `${head(f, i)}
+> **${f.zombies}** Zombies • **${f.mega}** Mega • **${+f.zombies + +f.mega}** Total` : `> ${rankMedal(i)} **—**`, inline: true },
+      { name: ZWS, value: b ? `${head(b, i)}
+> **${b.structures}** Structures • **${b.barricades}** Barricades • **${+b.structures + +b.barricades}** Total` : `> ${rankMedal(i)} **—**`, inline: true },
+      { name: ZWS, value: g ? `${head(g, i)}
+> **${g.resources}** Resources` : `> ${rankMedal(i)} **—**`, inline: true }
+    );
+  }
+  return e.setTimestamp();
+}
+
 function buildSingleBoardEmbed(metric, rows) {
   const meta =
     {
@@ -201,5 +227,6 @@ module.exports = {
   MESSAGE_EMBED_BUDGET,
   buildLeaderboardEmbed,
   buildSingleBoardEmbed,
+  buildFarmbotsEmbed,
   buildPlayerStatsEmbed,
 };

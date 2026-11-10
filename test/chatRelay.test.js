@@ -100,66 +100,37 @@ describe("ChatRelay Architecture & Webhook Redesign Tests", () => {
   });
 
   describe("Unturned -> Discord Webhook Delivery & Zero Persistence", () => {
-    it("should deliver game chat via webhook with player name and avatar formatting", async () => {
-      guildRepo.upsertGuildConfig("guild-1", {
-        chatChannelId: "channel-chat-1",
-        chatWebhookUrl: "https://discord.com/api/webhooks/123/token",
-      });
+    function relayWithChannel(avatars) {
+      const sent = [];
+      fakeClient.channels = { fetch: async () => ({ isTextBased: () => true, send: async (p) => (sent.push(p), { id: "m" }) }) };
+      return { sent, relay: new ChatRelay({ discordClient: fakeClient, wsServer: fakeWsServer, guildRepo, avatars }) };
+    }
 
-      const relay = new ChatRelay({
-        discordClient: fakeClient,
-        wsServer: fakeWsServer,
-        guildRepo,
-      });
+    it("delivers game chat as an old-style card: [steam avatar] Name: message, mentions disarmed", async () => {
+      guildRepo.upsertGuildConfig("guild-1", { chatChannelId: "channel-chat-1" });
+      const { sent, relay } = relayWithChannel({ getProfile: async () => ({ avatarUrl: "https://cdn/avatar.jpg" }) });
 
-      // Inject mock webhook client
-      relay.webhookClients.set("guild-1", fakeWebhookClient);
+      await relay.handleGameChatEvent({ serverId: "survival-1", steamId: "76561198000000001", playerName: "PlayerOne", message: "Hello survivors!", mode: "Global" });
 
-      await relay.handleGameChatEvent({
-        serverId: "survival-1",
-        serverName: "Survival Alpha",
-        steamId: "76561198000000001",
-        playerName: "PlayerOne",
-        message: "Hello survivors from Unturned!",
-        mode: "Global",
-        avatarUrl: "https://example.com/custom_avatar.png",
-      });
-
-      // Wait a tick for queue processing
-      await new Promise((r) => setImmediate(r));
-
-      assert.strictEqual(deliveredWebhookMessages.length, 1);
-      const delivery = deliveredWebhookMessages[0];
-      assert.strictEqual(delivery.content, "Hello survivors from Unturned!");
-      assert.strictEqual(delivery.username, "[Survival Alpha] PlayerOne");
-      assert.strictEqual(delivery.avatarURL, "https://example.com/custom_avatar.png");
-      assert.deepStrictEqual(delivery.allowedMentions, { parse: [] }, "Mentions must be disarmed");
+      assert.strictEqual(sent.length, 1);
+      const e = sent[0].embeds[0].toJSON();
+      assert.strictEqual(e.author.name, "PlayerOne: Hello survivors!");
+      assert.strictEqual(e.author.icon_url, "https://cdn/avatar.jpg");
+      assert.strictEqual(e.color, 0xd41111);
+      assert.deepStrictEqual(sent[0].allowedMentions, { parse: [] });
+      assert.ok(!e.footer, "global chat has no footer");
     });
 
-    it("should fall back to Steam avatar when avatarUrl is omitted", async () => {
-      guildRepo.upsertGuildConfig("guild-1", {
-        chatChannelId: "channel-chat-1",
-        chatWebhookUrl: "https://discord.com/api/webhooks/123/token",
-      });
+    it("adds Local/Group footers and still delivers when the avatar lookup fails", async () => {
+      guildRepo.upsertGuildConfig("guild-1", { chatChannelId: "channel-chat-1" });
+      const { sent, relay } = relayWithChannel({ getProfile: async () => ({ avatarUrl: null }) });
 
-      const relay = new ChatRelay({
-        discordClient: fakeClient,
-        wsServer: fakeWsServer,
-        guildRepo,
-      });
-      relay.webhookClients.set("guild-1", fakeWebhookClient);
+      await relay.handleGameChatEvent({ serverId: "s", steamId: "1", playerName: "A", message: "hi", mode: "local", locationName: "Kuwait" });
+      await relay.handleGameChatEvent({ serverId: "s", steamId: "1", playerName: "A", message: "hi", mode: "group", group: { name: "Team" } });
 
-      await relay.handleGameChatEvent({
-        serverId: "survival-1",
-        steamId: "76561198000000001",
-        playerName: "SurvivorBob",
-        message: "Testing default avatar",
-      });
-
-      await new Promise((r) => setImmediate(r));
-
-      assert.strictEqual(deliveredWebhookMessages.length, 1);
-      assert.ok(deliveredWebhookMessages[0].avatarURL.includes("steamstatic.com"));
+      assert.strictEqual(sent[0].embeds[0].toJSON().footer.text, "Local: Kuwait");
+      assert.strictEqual(sent[1].embeds[0].toJSON().footer.text, "Group: Team");
+      assert.ok(!sent[0].embeds[0].toJSON().author.icon_url);
     });
 
     it("should strictly never insert chat messages into SQLite database (zero persistence law)", async () => {
@@ -173,7 +144,7 @@ describe("ChatRelay Architecture & Webhook Redesign Tests", () => {
         wsServer: fakeWsServer,
         guildRepo,
       });
-      relay.webhookClients.set("guild-1", fakeWebhookClient);
+      fakeClient.channels = { fetch: async () => ({ isTextBased: () => true, send: async () => ({}) }) };
 
       await relay.handleGameChatEvent({
         serverId: "survival-1",
@@ -336,45 +307,6 @@ describe("ChatRelay Architecture & Webhook Redesign Tests", () => {
 
       // Release pending promise
       if (resolveSend) resolveSend({ id: "done" });
-    });
-
-    it("should handle invalid/deleted webhook (404 / 10015) by clearing configuration", async () => {
-      let invalidatedGuildId = null;
-      const relay = new ChatRelay({
-        discordClient: fakeClient,
-        wsServer: fakeWsServer,
-        guildRepo,
-      });
-
-      guildRepo.upsertGuildConfig("guild-dead", {
-        chatChannelId: "ch-dead",
-        chatWebhookUrl: "https://discord.com/api/webhooks/999/deleted_token",
-      });
-
-      const failingWebhook = {
-        send: async () => {
-          const err = new Error("Unknown Webhook");
-          err.code = 10015;
-          throw err;
-        },
-        destroy: () => {},
-      };
-
-      relay.webhookClients.set("guild-dead", failingWebhook);
-
-      // Trigger delivery
-      await relay.handleGameChatEvent({
-        serverId: "survival-1",
-        playerName: "Tester",
-        message: "Hello to dead webhook",
-      });
-
-      await new Promise((r) => setTimeout(r, 50));
-
-      // Verify invalid webhook was cleared from cache and database
-      assert.strictEqual(relay.webhookClients.has("guild-dead"), false);
-      const updatedCfg = guildRepo.getGuildConfig("guild-dead");
-      assert.strictEqual(updatedCfg.chatWebhookUrl, null, "Deleted webhook URL must be cleared from DB");
     });
   });
 

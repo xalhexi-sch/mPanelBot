@@ -71,10 +71,15 @@ describe("DiscordLogger Unit & Integration Tests", () => {
 
       assert.strictEqual(sentMessages.length, 1);
       const embed = sentMessages[0].embeds[0].data;
-      assert.strictEqual(embed.author.name, "SurvivorOne: joined the server");
+      assert.strictEqual(embed.title, "Player Joined");
       assert.strictEqual(embed.color, 0x57f287);
       assert.strictEqual(embed.footer.text, "survival-1");
-      assert.ok(embed.author.url.endsWith("76561198000000001"));
+      const f = Object.fromEntries(embed.fields.map((x) => [x.name, x.value]));
+      assert.ok(f.Player.includes("SurvivorOne") && f.Player.includes("76561198000000001"));
+      assert.strictEqual(f["Steam ID"], "`76561198000000001`");
+      assert.strictEqual(f.Discord, "Unlinked");
+      assert.strictEqual(f.Group, "None");
+      assert.ok("Created" in f);
     });
 
     it("should log player disconnected to joinLeaveChannelId with formatted duration", async () => {
@@ -96,8 +101,10 @@ describe("DiscordLogger Unit & Integration Tests", () => {
 
       assert.strictEqual(sentMessages.length, 1);
       const embed = sentMessages[0].embeds[0].data;
-      assert.strictEqual(embed.author.name, "SurvivorOne: left the server (played 1h 1m 5s)");
-      assert.strictEqual(embed.color, 0xd41111);
+      assert.strictEqual(embed.title, "Player Left");
+      assert.strictEqual(embed.color, 0xed4245);
+      const f = Object.fromEntries(embed.fields.map((x) => [x.name, x.value]));
+      assert.strictEqual(f["Session Time"], "1h 1m 5s");
     });
   });
 
@@ -443,8 +450,8 @@ describe("DiscordLogger Unit & Integration Tests", () => {
       });
 
       assert.strictEqual(sentMessages.length, 4);
-      assert.strictEqual(sentMessages[0].embeds[0].data.author.name.endsWith("joined the server"), true);
-      assert.strictEqual(sentMessages[1].embeds[0].data.author.name.includes("left the server"), true);
+      assert.strictEqual(sentMessages[0].embeds[0].data.title, "Player Joined");
+      assert.strictEqual(sentMessages[1].embeds[0].data.title, "Player Left");
       assert.strictEqual(sentMessages[2].embeds[0].data.author.name.includes(": "), true);
       assert.strictEqual(sentMessages[3].embeds[0].data.title, "🔨 Moderation: WARN");
     });

@@ -1,3 +1,4 @@
+const { EmbedBuilder } = require("discord.js");
 const crypto = require("node:crypto");
 const { WebhookClient, PermissionFlagsBits } = require("discord.js");
 const { createCommand } = require("../../websocket/protocol");
@@ -232,61 +233,29 @@ class ChatRelay {
    * and delivers to Discord via Webhook through the bounded delivery queue.
    * NOTE: Chat message content is NEVER saved to SQLite/MySQL.
    */
-  async handleGameChatEvent({ serverId, serverName, steamId, playerName, message, mode = "Global", avatarUrl }) {
+  async handleGameChatEvent({ serverId, steamId, playerName, message, mode = "Global", locationName = null, group = null }) {
     const cleanMsg = String(message || "").trim();
     if (!cleanMsg) return;
 
-    // Format username: max 32 characters, strip invalid characters (@, #, :, `)
-    const sName = serverName || serverId;
-    const cleanPlayerName = String(playerName || "Player").trim().replace(/[@#:`]/g, "");
-    const formattedUsername = sName
-      ? `[${sName}] ${cleanPlayerName}`.slice(0, 32)
-      : cleanPlayerName.slice(0, 32);
+    const name = String(playerName || "Player").trim().replace(/[@#`]/g, "") || "Player";
+    const profile = this.avatars && steamId ? await this.avatars.getProfile(steamId) : { avatarUrl: null };
 
-    // Real Steam avatar (cached, never blocks on failure), then the default
-    const steamAvatar = !avatarUrl && this.avatars ? await this.avatars.get(steamId) : null;
-    const resolvedAvatar =
-      avatarUrl && typeof avatarUrl === "string" && avatarUrl.startsWith("http")
-        ? avatarUrl
-        : steamAvatar || DEFAULT_AVATAR_URL;
+    // Old Blood Horizon chat card: [avatar] **Name: message** (+ footer for local/group chat)
+    const author = { name: `${name}: ${cleanMsg}`.slice(0, 256) };
+    if (profile.avatarUrl) author.iconURL = profile.avatarUrl;
+    if (steamId) author.url = `https://steamcommunity.com/profiles/${steamId}`;
+    const embed = new EmbedBuilder().setColor(0xd41111).setAuthor(author).setTimestamp();
 
-    const configs = this.guildRepo.getAllGuildConfigs();
+    const m = String(mode || "").toLowerCase();
+    if (m === "local" || m === "area") embed.setFooter({ text: `Local: ${locationName || "Unknown"}` });
+    else if (m === "group") embed.setFooter({ text: `Group: ${group?.name || group?.id || "Unknown"}` });
 
-    for (const cfg of configs) {
+    for (const cfg of this.guildRepo.getAllGuildConfigs()) {
       if (!cfg.chatChannelId) continue;
-
       try {
-        const guild =
-          this.client.guilds.cache.get(cfg.guildId) ||
-          (await this.client.guilds.fetch(cfg.guildId).catch(() => null));
-
-        const webhookClient = await this.getOrCreateWebhookClient(cfg, guild);
-
-        if (webhookClient) {
-          // Enqueue to bounded queue (handles rate limiting and queue overflow safely)
-          this.queue.enqueue({
-            webhookClient,
-            guildId: cfg.guildId,
-            payload: {
-              content: cleanMsg.slice(0, 2000),
-              username: formattedUsername,
-              avatarURL: resolvedAvatar,
-              allowedMentions: { parse: [] }, // Disarm @everyone, @here, and role pings
-            },
-          });
-        } else if (guild) {
-          // Fallback to bot message if webhook is not accessible
-          const channel =
-            guild.channels.cache.get(cfg.chatChannelId) ||
-            (await guild.channels.fetch(cfg.chatChannelId).catch(() => null));
-
-          if (channel && channel.isTextBased()) {
-            const formattedFallback = `💬 **[${mode}] [${cleanPlayerName}](https://steamcommunity.com/profiles/${steamId || "0"}):** ${cleanMsg.slice(0, 1000)}`;
-            await channel.send({
-              content: formattedFallback,
-              allowedMentions: { parse: [] },
-            });
-          }
+        const channel = await this.client.channels.fetch(cfg.chatChannelId).catch(() => null);
+        if (channel && channel.isTextBased()) {
+          await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
         }
       } catch (err) {
         console.warn(`[chatRelay] Failed to deliver game chat: ${redactWebhookUrl(err.message)}`);

@@ -13,6 +13,8 @@ const {
   buildStatsCommand,
   buildRankingCommand,
   buildCompareCommand,
+  buildFarmbotsCommand,
+  handleFarmbotsInteraction,
   handleStatsInteraction,
   handleRankingInteraction,
   handleCompareInteraction,
@@ -70,6 +72,7 @@ class DiscordBotClient {
       buildStatsCommand(),
       buildRankingCommand(),
       buildCompareCommand(),
+      buildFarmbotsCommand(),
       buildBanCommand(),
       buildMuteCommand(),
       buildWarnCommand(),
@@ -192,6 +195,9 @@ class DiscordBotClient {
       }
       if (cmd === "ranking") {
         return await handleRankingInteraction(interaction, context);
+      }
+      if (cmd === "farmbots") {
+        return await handleFarmbotsInteraction(interaction, context);
       }
       if (cmd === "compare") {
         return await handleCompareInteraction(interaction, context);

@@ -28,6 +28,11 @@ class MySqlStatsSource {
       headshots: ident(c.headshots, "column"),
       deaths: ident(c.deaths, "column"),
       playtime: ident(c.playtime, "column"),
+      zombies: ident(c.zombies || "Zombies", "column"),
+      megaZombies: ident(c.megaZombies || "MegaZombies", "column"),
+      resources: ident(c.resources || "Resources", "column"),
+      structures: ident(c.structures || "Structures", "column"),
+      barricades: ident(c.barricades || "Barricades", "column"),
     };
     this.playtimeFactor = cfg.playtimeUnit === "minutes" ? 60 : 1;
     this.pool = this.mysql.createPool({
@@ -75,6 +80,24 @@ class MySqlStatsSource {
     const n = Math.max(1, Math.min(25, Number(limit) | 0 || 10));
     const [rows] = await this.pool.query(`SELECT ${this._select()} FROM ${this.table} ORDER BY ${order} DESC LIMIT ${n}`);
     return rows.map((r) => this._map(r));
+  }
+
+  /** Zombie farmers, builders and resource gatherers (top N each). */
+  async getFarm(limit) {
+    const c = this.col;
+    const n = Math.max(1, Math.min(10, Number(limit) | 0 || 5));
+    const q = async (extra, order) => {
+      const [rows] = await this.pool.query(
+        `SELECT CAST(${c.steamId} AS CHAR) AS steamId, ${c.name} AS name, ${extra} FROM ${this.table} ORDER BY ${order} DESC LIMIT ${n}`
+      );
+      return rows;
+    };
+    const [farmers, builders, gatherers] = await Promise.all([
+      q(`${c.zombies} AS zombies, ${c.megaZombies} AS mega`, `(${c.zombies} + ${c.megaZombies})`),
+      q(`${c.structures} AS structures, ${c.barricades} AS barricades`, `(${c.structures} + ${c.barricades})`),
+      q(`${c.resources} AS resources`, c.resources),
+    ]);
+    return { farmers, builders, gatherers };
   }
 
   async getKillsRank(kills) {
@@ -166,6 +189,17 @@ class StatsService {
       (src) => src.getTop(m, limit),
       () => (m === "playtime" ? this.repo.getTopPlaytime(limit) : m === "deaths" ? this.repo.getTopDeaths(limit) : this.repo.getTopKills(limit))
     );
+  }
+
+  /** Farm/build rankings only exist in the legacy MySQL table; returns null when MySQL is not enabled. */
+  async getFarmboards(limit = 5) {
+    if (!this.mysql) return null;
+    try {
+      return await this.mysql.getFarm(limit);
+    } catch (err) {
+      this.logger.warn(`[stats] MySQL farm query failed: ${err.message}`);
+      return null;
+    }
   }
 
   async getLeaderboards(limit = 10) {

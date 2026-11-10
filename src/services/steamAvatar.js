@@ -1,51 +1,93 @@
 /**
- * Resolves a player's Steam avatar URL from the public Steam Community profile XML (no API key needed).
- * Results are cached (bounded + TTL) and failures are negatively cached so a Steam outage never slows Discord delivery.
+ * Public Steam Community lookups (no API key): profile avatar, account creation date, and group names.
+ * Everything is cached (bounded + TTL) and failures are negatively cached so a Steam outage never slows Discord delivery.
  */
 const OK_TTL_MS = 6 * 60 * 60 * 1000;
 const FAIL_TTL_MS = 10 * 60 * 1000;
 const MAX_ENTRIES = 2000;
 
+const tag = (xml, name) => {
+  const re = new RegExp(String.raw`<${name}>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?</${name}>`, "i");
+  const m = xml.match(re);
+  return m ? m[1].trim() : "";
+};
+
 class SteamAvatarService {
   constructor({ fetchImpl = globalThis.fetch, timeoutMs = 4000 } = {}) {
     this.fetch = fetchImpl;
     this.timeoutMs = timeoutMs;
-    this.cache = new Map(); // steamId -> { url|null, expires }
+    this.profiles = new Map(); // steamId -> { value, expires }
+    this.groups = new Map(); // groupId -> { value, expires }
     this.pending = new Map();
   }
 
-  /** @returns {Promise<string|null>} full-size avatar URL or null */
-  async get(steamId) {
-    const id = String(steamId || "").trim();
-    if (!/^\d{17}$/.test(id)) return null;
+  async _xml(url) {
+    const res = await this.fetch(url, { signal: AbortSignal.timeout(this.timeoutMs), headers: { "user-agent": "mPanelBot/1.0" } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  }
 
-    const hit = this.cache.get(id);
-    if (hit && hit.expires > Date.now()) return hit.url;
-    if (this.pending.has(id)) return this.pending.get(id);
+  _remember(map, key, value, ok) {
+    if (map.size >= MAX_ENTRIES) map.delete(map.keys().next().value);
+    map.set(key, { value, expires: Date.now() + (ok ? OK_TTL_MS : FAIL_TTL_MS) });
+    return value;
+  }
 
-    const p = this._lookup(id).finally(() => this.pending.delete(id));
-    this.pending.set(id, p);
+  _dedupe(key, fn) {
+    if (this.pending.has(key)) return this.pending.get(key);
+    const p = fn().finally(() => this.pending.delete(key));
+    this.pending.set(key, p);
     return p;
   }
 
-  async _lookup(id) {
-    let url = null;
-    try {
-      const res = await this.fetch(`https://steamcommunity.com/profiles/${id}?xml=1`, {
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
-      if (res.ok) {
-        const xml = await res.text();
-        const m = xml.match(/<avatarFull><!\[CDATA\[(https?:\/\/[^\]]+)\]\]><\/avatarFull>/);
-        url = m ? m[1] : null;
-      }
-    } catch {
-      url = null;
-    }
+  /** @returns {Promise<{avatarUrl:string|null, createdUnix:number|null}>} */
+  async getProfile(steamId) {
+    const id = String(steamId || "").trim();
+    const empty = { avatarUrl: null, createdUnix: null };
+    if (!/^\d{17}$/.test(id)) return empty;
+    const hit = this.profiles.get(id);
+    if (hit && hit.expires > Date.now()) return hit.value;
 
-    if (this.cache.size >= MAX_ENTRIES) this.cache.delete(this.cache.keys().next().value);
-    this.cache.set(id, { url, expires: Date.now() + (url ? OK_TTL_MS : FAIL_TTL_MS) });
-    return url;
+    return this._dedupe(`p:${id}`, async () => {
+      try {
+        const xml = await this._xml(`https://steamcommunity.com/profiles/${id}?xml=1`);
+        const avatar = tag(xml, "avatarFull");
+        const since = Date.parse(`${tag(xml, "memberSince")} UTC`);
+        return this._remember(
+          this.profiles,
+          id,
+          { avatarUrl: /^https?:\/\//.test(avatar) ? avatar : null, createdUnix: Number.isNaN(since) ? null : Math.floor(since / 1000) },
+          Boolean(avatar)
+        );
+      } catch {
+        return this._remember(this.profiles, id, empty, false);
+      }
+    });
+  }
+
+  /** Back-compat: just the avatar URL. */
+  async get(steamId) {
+    return (await this.getProfile(steamId)).avatarUrl;
+  }
+
+  /** Steam group name + url from its numeric gid. */
+  async getGroup(groupId) {
+    const id = String(groupId || "").trim();
+    if (!/^\d{5,20}$/.test(id)) return null;
+    const hit = this.groups.get(id);
+    if (hit && hit.expires > Date.now()) return hit.value;
+
+    return this._dedupe(`g:${id}`, async () => {
+      try {
+        const xml = await this._xml(`https://steamcommunity.com/gid/${id}/memberslistxml/?xml=1`);
+        const name = tag(xml, "groupName").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+        const slug = tag(xml, "groupURL");
+        const value = name ? { name, url: slug ? `https://steamcommunity.com/groups/${slug}` : `https://steamcommunity.com/gid/${id}` } : null;
+        return this._remember(this.groups, id, value, Boolean(value));
+      } catch {
+        return this._remember(this.groups, id, null, false);
+      }
+    });
   }
 }
 

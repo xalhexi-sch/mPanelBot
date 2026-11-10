@@ -136,6 +136,7 @@ async function main() {
     guildRepo,
     avatars,
     snapshotRepo,
+    linkRepo,
   });
   discordBot.discordLogger = discordLogger;
 

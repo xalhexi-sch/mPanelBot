@@ -209,3 +209,68 @@ describe("guild repository", () => {
     db.close();
   });
 });
+
+describe("steam profile, join card and farmbots", () => {
+  const { SteamAvatarService } = require("../src/services/steamAvatar");
+  const { DiscordLogger } = require("../src/discord/logs/discordLogger");
+  const { buildFarmbotsEmbed } = require("../src/discord/views");
+
+  const xml = (body) => ({ ok: true, text: async () => body });
+
+  it("parses avatar + account creation date and group name from Steam XML, with caching", async () => {
+    let calls = 0;
+    const svc = new SteamAvatarService({
+      fetchImpl: async (url) => {
+        calls++;
+        return String(url).includes("/gid/")
+          ? xml("<memberList><groupDetails><groupName><![CDATA[Night &amp; Day]]></groupName><groupURL><![CDATA[nightday]]></groupURL></groupDetails></memberList>")
+          : xml("<profile><avatarFull><![CDATA[https://cdn/x_full.jpg]]></avatarFull><memberSince>September 4, 2013</memberSince></profile>");
+      },
+    });
+    const p = await svc.getProfile("76561198000000001");
+    assert.strictEqual(p.avatarUrl, "https://cdn/x_full.jpg");
+    assert.strictEqual(p.createdUnix, Date.UTC(2013, 8, 4) / 1000);
+    await svc.getProfile("76561198000000001");
+    assert.strictEqual(calls, 1, "second lookup served from cache");
+    const g = await svc.getGroup("103582791475043382");
+    assert.deepStrictEqual(g, { name: "Night & Day", url: "https://steamcommunity.com/groups/nightday" });
+  });
+
+  it("never throws when Steam is down", async () => {
+    const svc = new SteamAvatarService({ fetchImpl: async () => { throw new Error("offline"); } });
+    assert.deepStrictEqual(await svc.getProfile("76561198000000001"), { avatarUrl: null, createdUnix: null });
+    assert.strictEqual(await svc.getGroup("103582791475043382"), null);
+  });
+
+  it("Player Joined card shows group, linked Discord user, account age and avatar thumbnail", async () => {
+    const sent = [];
+    const guildRepo = { getAllGuildConfigs: () => [{ guildId: "g", joinLeaveChannelId: "c" }] };
+    const channel = { isTextBased: () => true, send: async (p) => sent.push(p) };
+    const client = { guilds: { cache: new Map([["g", { channels: { cache: new Map([["c", channel]]) } }]]) } };
+    const logger = new DiscordLogger({
+      discordClient: client,
+      guildRepo,
+      linkRepo: { getLinkBySteam: () => ({ discord_id: "555" }) },
+      avatars: { getProfile: async () => ({ avatarUrl: "https://cdn/a.jpg", createdUnix: 1378252800 }), getGroup: async () => ({ name: "Team Rocket", url: "https://steamcommunity.com/groups/tr" }) },
+    });
+    await logger.logPlayerConnected({ serverId: "s1", steamId: "76561198000000001", playerName: "Ash", group: { kind: "steam", id: "103582791475043382" } });
+    const e = sent[0].embeds[0].toJSON();
+    const f = Object.fromEntries(e.fields.map((x) => [x.name, x.value]));
+    assert.strictEqual(e.thumbnail.url, "https://cdn/a.jpg");
+    assert.strictEqual(f.Discord, "<@555>");
+    assert.strictEqual(f.Group, "[Team Rocket](https://steamcommunity.com/groups/tr)");
+    assert.strictEqual(f.Created, "<t:1378252800:R>");
+  });
+
+  it("farmbots embed lists farmers / builders / gatherers like the old bot", () => {
+    const e = buildFarmbotsEmbed({
+      farmers: [{ steamId: "1", name: "Z", zombies: 10, mega: 2 }],
+      builders: [{ steamId: "2", name: "B", structures: 5, barricades: 7 }],
+      gatherers: [{ steamId: "3", name: "G", resources: 99 }],
+    }).toJSON();
+    assert.strictEqual(e.fields.length, 18);
+    assert.match(e.fields[3].value, /\*\*10\*\* Zombies • \*\*2\*\* Mega • \*\*12\*\* Total/);
+    assert.match(e.fields[4].value, /\*\*12\*\* Total/);
+    assert.match(e.fields[5].value, /\*\*99\*\* Resources/);
+  });
+});

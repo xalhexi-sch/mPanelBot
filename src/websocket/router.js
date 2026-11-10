@@ -103,7 +103,8 @@ class MessageRouter {
             playerName: payload.playerName,
             message: payload.message || payload.messageText,
             mode: payload.mode || payload.chatMode || payload.channel || "Global",
-            avatarUrl: payload.avatarUrl,
+            locationName: payload.locationName,
+            group: payload.group,
           });
         }
         break;
