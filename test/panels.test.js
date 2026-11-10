@@ -204,7 +204,7 @@ describe("guild repository", () => {
     assert.strictEqual(cfg.statusChannelId, "10");
     assert.deepStrictEqual(cfg.adminRoleIds, ["5"]);
     const raw = db.prepare("SELECT chat_webhook_url FROM guild_configs WHERE guild_id = ?").get("g").chat_webhook_url;
-    assert.ok(!raw.includes("abc"), "webhook must not be stored in plaintext");
+    assert.ok(!raw.includes("discord.com/api/webhooks"), "webhook must not be stored in plaintext");
     // partial update keeps other fields
     repo.upsertGuildConfig("g", { leaderboardChannelId: "11" });
     assert.strictEqual(repo.getGuildConfig("g").statusChannelId, "10");
