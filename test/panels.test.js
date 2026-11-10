@@ -1,0 +1,176 @@
+const { describe, it } = require("node:test");
+const assert = require("node:assert");
+
+const { DatabaseManager } = require("../src/database");
+const { GuildRepository } = require("../src/database/repositories/guildRepository");
+const { SnapshotRepository } = require("../src/database/repositories/snapshotRepository");
+const { StatsRepository } = require("../src/database/repositories/statsRepository");
+const { StatsService, MySqlStatsSource } = require("../src/services/statsService");
+const { LivePanels } = require("../src/discord/livePanels");
+const { buildServerStatusEmbed, buildLeaderboardEmbed, formatDuration, trimName } = require("../src/discord/views");
+
+const silent = { warn() {}, log() {} };
+
+describe("views", () => {
+  it("formats durations compactly", () => {
+    assert.strictEqual(formatDuration(45), "45s");
+    assert.strictEqual(formatDuration(3700), "1h 1m");
+    assert.strictEqual(formatDuration(90000), "1d 1h");
+  });
+
+  it("strips markdown from names so they cannot break links", () => {
+    assert.strictEqual(trimName("[evil](x)*name*"), "evilxname");
+    assert.strictEqual(trimName(""), "Unknown");
+  });
+
+  it("renders an online server with a 3-column player grid padded to full rows", () => {
+    const e = buildServerStatusEmbed(
+      { serverId: "s1", serverName: "One", map: "PEI", onlinePlayers: 4, maxPlayers: 24, players: Array.from({ length: 4 }, (_, i) => ({ steamId: `7656119800000000${i}`, playerName: `P${i}`, pingMs: 10, sessionDurationSeconds: i * 60 })) },
+      { online: true }
+    ).toJSON();
+    assert.match(e.title, /🟢 One/);
+    assert.strictEqual(e.fields.length % 3, 0);
+    assert.ok(e.description.includes("4/24"));
+  });
+
+  it("renders an offline server greyed out", () => {
+    const e = buildServerStatusEmbed({ serverId: "s1", serverName: "One", updatedAtUtc: new Date().toISOString() }, { online: false }).toJSON();
+    assert.match(e.title, /🔴/);
+    assert.match(e.description, /Offline/);
+  });
+
+  it("keeps the top-10 leaderboard within Discord field limits", () => {
+    const rows = Array.from({ length: 10 }, (_, i) => ({ steam_id: `${i}`, player_name: "A".repeat(40), kills: 1e6, deaths: 1e6, playtime_seconds: 1e9 }));
+    const e = buildLeaderboardEmbed({ kills: rows, playtime: rows, deaths: rows }).toJSON();
+    assert.strictEqual(e.fields.length, 3);
+    for (const f of e.fields) assert.ok(f.value.length <= 1024);
+  });
+});
+
+describe("MySQL stats source (optional)", () => {
+  const cfg = {
+    enabled: true, host: "h", port: 3306, user: "u", password: "p", database: "d", table: "PlayerStats", playtimeUnit: "minutes",
+    columns: { steamId: "SteamId", name: "Name", kills: "Kills", headshots: "Headshots", deaths: "PVPDeaths", playtime: "Playtime" },
+  };
+
+  function fakeMysql(handler) {
+    const calls = [];
+    return {
+      calls,
+      createPool: () => ({
+        execute: async (sql, params) => (calls.push({ sql, params }), handler(sql, params)),
+        query: async (sql, params) => (calls.push({ sql, params }), handler(sql, params)),
+        end: async () => {},
+      }),
+    };
+  }
+
+  it("reads legacy PlayerStats rows, converts minutes to seconds and uses parameterised SQL", async () => {
+    const mysql = fakeMysql((sql) => {
+      if (/COUNT\(\*\) AS total/.test(sql)) return [[{ total: 50 }]];
+      if (/COUNT\(\*\) \+ 1/.test(sql)) return [[{ rnk: 3 }]];
+      return [[{ steamId: "76561198000000001", playerName: "Legacy", kills: 10, headshots: 4, deaths: 5, playtime: 120 }]];
+    });
+    const svc = new StatsService({ statsRepo: {}, mysqlConfig: cfg, mysqlModule: mysql, logger: silent });
+    assert.strictEqual(svc.source, "mysql");
+    const s = await svc.getStats("76561198000000001");
+    assert.strictEqual(s.playtimeSeconds, 7200);
+    assert.strictEqual(s.rank, 3);
+    assert.strictEqual(s.total, 50);
+    assert.ok(mysql.calls.some((c) => /WHERE `SteamId` = \?/.test(c.sql) && c.params[0] === "76561198000000001"));
+  });
+
+  it("rejects hostile identifiers in the configuration", () => {
+    assert.throws(() => new MySqlStatsSource({ ...cfg, table: "x; DROP TABLE y" }, fakeMysql(() => [[]])));
+  });
+
+  it("falls back to SQLite when MySQL fails", async () => {
+    const db = new DatabaseManager(":memory:");
+    const repo = new StatsRepository(db);
+    repo.recordKillCredit("76561198000000005", "Local", false);
+    const mysql = fakeMysql(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    const svc = new StatsService({ statsRepo: repo, mysqlConfig: cfg, mysqlModule: mysql, logger: silent });
+    const top = await svc.getTop("kills", 10);
+    assert.strictEqual(top[0].steam_id, "76561198000000005");
+    db.close();
+  });
+});
+
+describe("live panels", () => {
+  function setup() {
+    const db = new DatabaseManager(":memory:");
+    const guildRepo = new GuildRepository(db, "secret");
+    const snapshotRepo = new SnapshotRepository(db);
+    const statsRepo = new StatsRepository(db);
+    snapshotRepo.saveSnapshot("s1", { serverName: "One", map: "PEI", onlinePlayers: 1, maxPlayers: 10, players: [{ steamId: "1", playerName: "A", pingMs: 5, sessionDurationSeconds: 5 }] });
+    statsRepo.recordKillCredit("76561198000000001", "A", true);
+
+    const sent = [];
+    const edits = [];
+    const store = new Map();
+    const channel = {
+      isTextBased: () => true,
+      send: async (p) => (sent.push(p), { id: "m1" }),
+      messages: { fetch: async (id) => (store.has(id) ? { edit: async (p) => edits.push(p) } : Promise.reject(new Error("Unknown Message"))) },
+    };
+    const client = { channels: { fetch: async () => channel } };
+    const panels = new LivePanels({ client, guildRepo, snapshotRepo, statsService: new StatsService({ statsRepo }), wsServer: { getActiveSessions: () => [{ serverId: "s1" }] }, logger: silent });
+    return { db, guildRepo, panels, sent, edits, store };
+  }
+
+  it("persists channel + message ids in SQLite and edits in place afterwards", async () => {
+    const { db, guildRepo, panels, sent, edits, store } = setup();
+    guildRepo.upsertGuildConfig("g1", { statusChannelId: "c1", leaderboardChannelId: "c2" });
+
+    await panels.refreshAll();
+    assert.strictEqual(sent.length, 2, "one status + one leaderboard message posted");
+    const cfg = guildRepo.getGuildConfig("g1");
+    assert.strictEqual(cfg.statusMessageId, "m1");
+    assert.strictEqual(cfg.leaderboardMessageId, "m1");
+
+    store.set("m1", true); // the message exists now
+    await panels.refreshPanel(guildRepo.getGuildConfig("g1"), "status");
+    assert.strictEqual(sent.length, 2, "no duplicate message");
+    db.close();
+  });
+
+  it("does not re-send identical content (rate-limit friendly)", async () => {
+    const { db, guildRepo, panels, edits, store } = setup();
+    store.set("m1", true);
+    guildRepo.upsertGuildConfig("g1", { leaderboardChannelId: "c2", leaderboardMessageId: "m1" });
+    const cfg = guildRepo.getGuildConfig("g1");
+    assert.strictEqual(await panels.refreshPanel(cfg, "leaderboard"), true);
+    assert.strictEqual(await panels.refreshPanel(cfg, "leaderboard"), false);
+    assert.strictEqual(edits.length, 1);
+    db.close();
+  });
+
+  it("posts a fresh message when the old one was deleted", async () => {
+    const { db, guildRepo, panels, sent } = setup();
+    guildRepo.upsertGuildConfig("g1", { statusChannelId: "c1", statusMessageId: "gone" });
+    await panels.refreshPanel(guildRepo.getGuildConfig("g1"), "status");
+    assert.strictEqual(sent.length, 1);
+    assert.strictEqual(guildRepo.getGuildConfig("g1").statusMessageId, "m1");
+    db.close();
+  });
+});
+
+describe("guild repository", () => {
+  it("round-trips every setting and keeps the webhook encrypted at rest", () => {
+    const db = new DatabaseManager(":memory:");
+    const repo = new GuildRepository(db, "k");
+    repo.upsertGuildConfig("g", { chatWebhookUrl: "https://discord.com/api/webhooks/1/abc", statusChannelId: "10", adminRoleIds: ["5"] });
+    const cfg = repo.getGuildConfig("g");
+    assert.strictEqual(cfg.chatWebhookUrl, "https://discord.com/api/webhooks/1/abc");
+    assert.strictEqual(cfg.statusChannelId, "10");
+    assert.deepStrictEqual(cfg.adminRoleIds, ["5"]);
+    const raw = db.prepare("SELECT chat_webhook_url FROM guild_configs WHERE guild_id = ?").get("g").chat_webhook_url;
+    assert.ok(!raw.includes("abc"), "webhook must not be stored in plaintext");
+    // partial update keeps other fields
+    repo.upsertGuildConfig("g", { leaderboardChannelId: "11" });
+    assert.strictEqual(repo.getGuildConfig("g").statusChannelId, "10");
+    db.close();
+  });
+});

@@ -14,6 +14,24 @@
     "sqlitePath": "./data/mpanel.sqlite"
   },
   "integrations": {
+    "mysql": {
+      "enabled": false,
+      "host": "127.0.0.1",
+      "port": 3306,
+      "user": "readonly_user",
+      "password": "CHANGE_ME",
+      "database": "unturned",
+      "table": "PlayerStats",
+      "playtimeUnit": "seconds",
+      "columns": {
+        "steamId": "SteamId",
+        "name": "Name",
+        "kills": "Kills",
+        "headshots": "Headshots",
+        "deaths": "PVPDeaths",
+        "playtime": "Playtime"
+      }
+    },
     "pterodactyl": {
       "enabled": false,
       "panelUrl": "https://panel.example.com",

@@ -35,6 +35,23 @@ class StatsRepository {
     });
   }
 
+  /** Credits only the killer (the victim's death arrives separately as `player.death`). */
+  recordKillCredit(killerSteamId, killerName, isHeadshot = false) {
+    const sid = String(killerSteamId).trim();
+    const name = String(killerName || "Unknown").trim();
+    const nowIso = new Date().toISOString();
+    const hs = isHeadshot ? 1 : 0;
+    return this.dbManager.prepare(`
+      INSERT INTO player_stats (steam_id, player_name, kills, deaths, headshots, playtime_seconds, last_seen_at_utc)
+      VALUES (?, ?, 1, 0, ?, 0, ?)
+      ON CONFLICT(steam_id) DO UPDATE SET
+        kills = kills + 1,
+        headshots = headshots + ?,
+        player_name = excluded.player_name,
+        last_seen_at_utc = excluded.last_seen_at_utc
+    `).run(sid, name, hs, nowIso, hs);
+  }
+
   recordDeath(victimSteamId, victimName) {
     const vSid = String(victimSteamId).trim();
     const vName = String(victimName || "Unknown").trim();

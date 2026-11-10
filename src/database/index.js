@@ -27,6 +27,20 @@ class DatabaseManager {
       const schemaSql = fs.readFileSync(schemaPath, "utf8");
       this.db.exec(schemaSql);
     }
+
+    // Idempotent column additions for databases created by an older schema version
+    try {
+      const have = new Set(this.db.prepare("PRAGMA table_info(guild_configs);").all().map((c) => c.name));
+      for (const col of [
+        "chat_webhook_url",
+        "status_channel_id",
+        "status_message_id",
+        "leaderboard_channel_id",
+        "leaderboard_message_id",
+      ]) {
+        if (have.size > 0 && !have.has(col)) this.db.exec(`ALTER TABLE guild_configs ADD COLUMN ${col} TEXT;`);
+      }
+    } catch {}
   }
 
   exec(sql) {

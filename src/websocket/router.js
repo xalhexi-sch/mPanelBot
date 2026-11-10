@@ -73,16 +73,20 @@ class MessageRouter {
         break;
 
       case "player.disconnected":
-        if (payload.steamId && payload.durationSeconds) {
-          this.statsRepo.recordPlaytime(payload.steamId, payload.playerName, payload.durationSeconds);
-        }
+        // Playtime is accounted exclusively from `player.session.ended` (clock-skew protected) to avoid double counting.
         if (this.discordLogger) {
           await this.discordLogger.logPlayerDisconnected({
             serverId,
             steamId: payload.steamId,
             playerName: payload.playerName,
-            durationSeconds: payload.durationSeconds,
+            durationSeconds: payload.durationSeconds ?? payload.sessionLengthSeconds,
           });
+        }
+        break;
+
+      case "player.session.ended":
+        if (payload.steamId) {
+          this.statsRepo.recordPlaytime(payload.steamId, payload.playerName, payload.durationSeconds);
         }
         break;
 
@@ -90,25 +94,26 @@ class MessageRouter {
         if (this.chatRelay) {
           await this.chatRelay.handleGameChatEvent({
             serverId,
+            serverName: payload.serverName || session.serverName || serverId,
             steamId: payload.steamId,
             playerName: payload.playerName,
-            message: payload.message,
-            mode: payload.mode || "Global",
+            message: payload.message || payload.messageText,
+            mode: payload.mode || payload.chatMode || payload.channel || "Global",
+            avatarUrl: payload.avatarUrl,
           });
         }
         break;
 
+      // The plugin emits BOTH events for a PvP kill: `player.kill` credits the killer only and
+      // `player.death` debits the victim only. Each increments exactly one side, so nothing is double counted.
       case "player.kill":
-      case "player.death":
         if (payload.killerSteamId) {
-          this.statsRepo.recordKill(
-            payload.killerSteamId,
-            payload.killerName,
-            payload.victimSteamId,
-            payload.victimName,
-            Boolean(payload.isHeadshot)
-          );
-        } else if (payload.victimSteamId) {
+          this.statsRepo.recordKillCredit(payload.killerSteamId, payload.killerName, Boolean(payload.isHeadshot));
+        }
+        break;
+
+      case "player.death":
+        if (payload.victimSteamId) {
           this.statsRepo.recordDeath(payload.victimSteamId, payload.victimName);
         }
         break;
@@ -142,27 +147,13 @@ class MessageRouter {
 
       case "log.command":
         if (this.discordLogger) {
-          await this.discordLogger.logCommand({
-            serverId,
-            steamId: payload.steamId,
-            playerName: payload.playerName,
-            command: payload.command,
-          });
+          await this.discordLogger.logCommand({ ...payload, serverId });
         }
         break;
 
       case "log.punishment":
         if (this.discordLogger) {
-          await this.discordLogger.logPunishment({
-            serverId,
-            adminSteamId: payload.adminSteamId,
-            adminName: payload.adminName,
-            action: payload.action,
-            targetSteamId: payload.targetSteamId,
-            targetName: payload.targetName,
-            reason: payload.reason,
-            duration: payload.duration,
-          });
+          await this.discordLogger.logPunishment({ ...payload, serverId });
         }
         break;
 

@@ -3,11 +3,14 @@ const { DatabaseManager } = require("./database");
 const { LinkRepository } = require("./database/repositories/linkRepository");
 const { DedupeRepository } = require("./database/repositories/dedupeRepository");
 const { StatsRepository } = require("./database/repositories/statsRepository");
+const { StatsService } = require("./services/statsService");
+const { LivePanels } = require("./discord/livePanels");
 const { GuildRepository } = require("./database/repositories/guildRepository");
 const { AuditRepository } = require("./database/repositories/auditRepository");
 const { SnapshotRepository } = require("./database/repositories/snapshotRepository");
 
 const { GameWebSocketServer } = require("./websocket/server");
+const { createEnvelope } = require("./websocket/protocol");
 const { MessageRouter } = require("./websocket/router");
 const { createHealthServer } = require("./http/healthServer");
 const { PterodactylClient } = require("./pterodactyl/client");
@@ -41,7 +44,9 @@ async function main() {
   const linkRepo = new LinkRepository(dbManager);
   const dedupeRepo = new DedupeRepository(dbManager);
   const statsRepo = new StatsRepository(dbManager);
-  const guildRepo = new GuildRepository(dbManager);
+  const statsService = new StatsService({ statsRepo, mysqlConfig: config.integrations.mysql });
+  console.log(`[stats] Player stats source: ${statsService.source}`);
+  const guildRepo = new GuildRepository(dbManager, config.network.apiKey);
   const auditRepo = new AuditRepository(dbManager);
   const snapshotRepo = new SnapshotRepository(dbManager);
 
@@ -76,7 +81,17 @@ async function main() {
   let roleSyncManager = null;
   const linkService = new LinkService({
     linkRepo,
-    onLinkCompleted: async ({ discordId, guild }) => {
+    onLinkCompleted: async ({ discordId, guild, steamId, serverId, code }) => {
+      // Tell the player in-game that the link succeeded (best effort; the plugin may be offline)
+      try {
+        const session = serverId ? wsServer.getSession(serverId) : null;
+        if (session && !session.isClosed) {
+          session.send(createEnvelope({ kind: "event", type: "player.link.completed", serverId, payload: { steamId, discordId, code } }));
+        }
+      } catch (err) {
+        console.warn(`[link] Could not notify game server: ${err.message}`);
+      }
+
       if (roleSyncManager && guild) {
         const member = await guild.members.fetch(discordId).catch(() => null);
         if (member) {
@@ -93,9 +108,18 @@ async function main() {
     guildRepo,
     linkRepo,
     statsRepo,
+    statsService,
     snapshotRepo,
     moderationService,
     linkService,
+  });
+
+  discordBot.livePanels = new LivePanels({
+    client: discordBot.client,
+    guildRepo,
+    snapshotRepo,
+    statsService,
+    wsServer,
   });
 
   roleSyncManager = new RoleSyncManager({
@@ -187,6 +211,7 @@ async function main() {
       wsServer.close();
       healthServer.close();
       await discordBot.stop().catch(() => {});
+      await statsService.close().catch(() => {});
       dbManager.close();
       console.log("[system] Shutdown complete. Goodbye!");
       process.exit(0);

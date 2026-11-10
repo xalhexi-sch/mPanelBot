@@ -191,3 +191,33 @@ Includes 39 tests covering:
 - One-time link code generation, TTL expiry, and atomic redemption.
 - Queue overflow bounds and reconnect replay handling.
 - Linked role sync decision logic.
+
+## Live status & leaderboard panels
+
+Run `/setup panels status_channel:#status leaderboard_channel:#leaderboards` (Administrator only).
+The bot posts **one** message per panel and edits it in place (status every 30 s, leaderboard every 60 s).
+Channel and message IDs are stored in SQLite; if the message is deleted a fresh one is posted automatically.
+`/setup panels disable:true` stops updating them. `/status`, `/ranking`, `/stats` and `/compare` use the same embed designs.
+
+## Optional: read stats from an existing MySQL `PlayerStats` table
+
+SQLite (fed by plugin events) is the default. To show stats from a legacy MySQL table instead, add this to `config.json`
+(bot-side only — never in the plugin config). The connection is read-only, uses parameterised queries, and the bot falls back to SQLite if MySQL is unreachable.
+
+```json
+"integrations": {
+  "mysql": {
+    "enabled": true,
+    "host": "127.0.0.1", "port": 3306,
+    "user": "readonly_user", "password": "CHANGE_ME", "database": "unturned",
+    "table": "PlayerStats",
+    "playtimeUnit": "seconds",
+    "columns": { "steamId": "SteamId", "name": "Name", "kills": "Kills", "headshots": "Headshots", "deaths": "PVPDeaths", "playtime": "Playtime" }
+  }
+}
+```
+
+## Tests
+
+`npm test` runs unit tests plus `test/e2e.test.js`, which drives the real WebSocket server with a fake plugin client
+using the exact payload shapes the C# plugin emits (stats, snapshots, logs, raid fan-out, link flow, moderation round trip).

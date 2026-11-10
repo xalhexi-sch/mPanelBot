@@ -13,7 +13,7 @@ class RaidNotifier {
     const location = (alert.location || "Unknown").trim();
     const attacker = (alert.attackerName || "").trim();
     const attackerSid = (alert.attackerSteamId || "").trim();
-    const weapon = (alert.weapon || "").trim();
+    const weapon = (alert.weapon || alert.weaponName || "").trim();
 
     if (isFinished) {
       return new EmbedBuilder()
@@ -46,9 +46,8 @@ class RaidNotifier {
 
   async handleRaidAlert(alert) {
     const ownerSid = alert.ownerSteamId || alert.steamId;
-    const eligibleSids = Array.isArray(alert.eligibleSteamIds) && alert.eligibleSteamIds.length > 0
-      ? alert.eligibleSteamIds
-      : (ownerSid ? [ownerSid] : []);
+    const pick = (...lists) => lists.find((l) => Array.isArray(l) && l.length > 0);
+    const eligibleSids = [...(pick(alert.eligibleSteamIds, alert.groupMemberSteamIds, alert.onlineMemberSteamIds) || (ownerSid ? [ownerSid] : []))];
 
     if (eligibleSids.length === 0) return;
 

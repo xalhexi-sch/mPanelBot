@@ -3,6 +3,28 @@ const path = require("node:path");
 
 const DEFAULT_CONFIG_PATH = path.resolve(__dirname, "../config.json");
 
+function loadMysqlConfig(m = {}) {
+  const c = m.columns || {};
+  return {
+    enabled: Boolean(m.enabled),
+    host: m.host || "127.0.0.1",
+    port: Number(m.port || 3306),
+    user: m.user || "",
+    password: m.password || "",
+    database: m.database || "",
+    table: m.table || "PlayerStats",
+    playtimeUnit: m.playtimeUnit === "minutes" ? "minutes" : "seconds",
+    columns: {
+      steamId: c.steamId || "SteamId",
+      name: c.name || "Name",
+      kills: c.kills || "Kills",
+      headshots: c.headshots || "Headshots",
+      deaths: c.deaths || "PVPDeaths",
+      playtime: c.playtime || "Playtime",
+    },
+  };
+}
+
 function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
   let parsed = null;
   const configExists = fs.existsSync(configPath);
@@ -59,6 +81,7 @@ function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
       sqlitePath: process.env.SQLITE_PATH || parsed?.storage?.sqlitePath || "./data/mpanel.sqlite",
     },
     integrations: {
+      mysql: loadMysqlConfig(parsed?.integrations?.mysql),
       pterodactyl: {
         enabled: process.env.PTERO_ENABLED ? process.env.PTERO_ENABLED === "true" : Boolean(parsed?.integrations?.pterodactyl?.enabled),
         panelUrl: (process.env.PTERO_PANEL_URL || parsed?.integrations?.pterodactyl?.panelUrl || "").replace(/\/$/, ""),

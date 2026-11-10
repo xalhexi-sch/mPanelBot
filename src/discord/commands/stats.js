@@ -1,35 +1,38 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const {
+  BRAND_COLOR,
+  formatDuration,
+  kdr,
+  buildLeaderboardEmbed,
+  buildSingleBoardEmbed,
+  buildPlayerStatsEmbed,
+  trimName,
+} = require("../views");
 
-function formatPlaytime(seconds) {
-  const s = Math.max(0, parseInt(seconds, 10) || 0);
-  const hours = Math.floor(s / 3600);
-  const minutes = Math.floor((s % 3600) / 60);
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  return `${minutes}m`;
+const STEAM64 = /^\d{17}$/;
+
+function normalizeSteam64(input) {
+  const t = String(input ?? "").trim();
+  const m = t.match(/steamcommunity\.com\/profiles\/(\d{17})/i);
+  return m ? m[1] : t;
 }
 
 function buildStatsCommand() {
   return new SlashCommandBuilder()
     .setName("stats")
     .setDescription("View Unturned player statistics")
-    .addStringOption((o) =>
-      o.setName("steamid").setDescription("Steam64 ID of the player")
-    )
-    .addUserOption((o) =>
-      o.setName("user").setDescription("Discord user with a linked account")
-    );
+    .addStringOption((o) => o.setName("steamid").setDescription("Steam64 ID (or profile URL) of the player"))
+    .addUserOption((o) => o.setName("user").setDescription("Discord user with a linked account"));
 }
 
 function buildRankingCommand() {
   return new SlashCommandBuilder()
     .setName("ranking")
-    .setDescription("Display Unturned server leaderboards")
+    .setDescription("Display the Unturned leaderboards")
     .addStringOption((o) =>
       o
         .setName("metric")
-        .setDescription("Ranking metric (default: kills)")
+        .setDescription("Show a single ranking instead of the full board")
         .addChoices(
           { name: "Kills", value: "kills" },
           { name: "Playtime", value: "playtime" },
@@ -42,154 +45,91 @@ function buildCompareCommand() {
   return new SlashCommandBuilder()
     .setName("compare")
     .setDescription("Compare statistics of two players side-by-side")
-    .addStringOption((o) =>
-      o.setName("steamid1").setDescription("Steam64 ID of player 1").setRequired(true)
-    )
-    .addStringOption((o) =>
-      o.setName("steamid2").setDescription("Steam64 ID of player 2").setRequired(true)
-    );
+    .addStringOption((o) => o.setName("steamid1").setDescription("Steam64 ID of player 1").setRequired(true))
+    .addStringOption((o) => o.setName("steamid2").setDescription("Steam64 ID of player 2").setRequired(true));
 }
 
-async function handleStatsInteraction(interaction, { statsRepo, linkRepo }) {
+async function handleStatsInteraction(interaction, { statsService, linkRepo }) {
   const steamInput = interaction.options.getString("steamid");
   const targetUser = interaction.options.getUser("user");
 
-  let steamId = null;
-
+  let steamId;
   if (steamInput) {
-    steamId = steamInput.trim();
-  } else if (targetUser) {
-    const link = linkRepo.getLinkByDiscord(targetUser.id);
-    if (!link) {
-      return interaction.reply({
-        content: `❌ User <@${targetUser.id}> does not have a linked Steam account.`,
-        ephemeral: true,
-      });
+    steamId = normalizeSteam64(steamInput);
+    if (!STEAM64.test(steamId)) {
+      return interaction.reply({ content: "❌ That is not a valid 17-digit Steam64 ID.", ephemeral: true });
     }
-    steamId = link.steam_id;
   } else {
-    // Default to invoking user
-    const link = linkRepo.getLinkByDiscord(interaction.user.id);
+    const discordId = (targetUser || interaction.user).id;
+    const link = linkRepo.getLinkByDiscord(discordId);
     if (!link) {
       return interaction.reply({
-        content: "❌ You have not linked your Steam account. Specify a `steamid` or use `/link` first.",
+        content: targetUser
+          ? `❌ <@${discordId}> has not linked a Steam account.`
+          : "❌ You have not linked your Steam account. Pass a `steamid` or use `/link` first.",
         ephemeral: true,
       });
     }
     steamId = link.steam_id;
   }
 
-  const stats = statsRepo.getStats(steamId);
-  if (!stats) {
-    return interaction.reply({
-      content: `⚠️ No recorded statistics found for SteamID \`${steamId}\`.`,
-      ephemeral: true,
+  await interaction.deferReply();
+  const stats = await statsService.getStats(steamId);
+  if (!stats) return interaction.editReply({ content: `⚠️ No recorded statistics for \`${steamId}\` yet.` });
+  return interaction.editReply({ embeds: [buildPlayerStatsEmbed(stats)] });
+}
+
+async function handleRankingInteraction(interaction, { statsService }) {
+  const metric = interaction.options.getString("metric");
+  await interaction.deferReply();
+
+  if (metric) {
+    const rows = await statsService.getTop(metric, 10);
+    return interaction.editReply({ embeds: [buildSingleBoardEmbed(metric, rows)] });
+  }
+  const boards = await statsService.getLeaderboards(10);
+  if (!boards.kills.length && !boards.playtime.length) {
+    return interaction.editReply({ content: "No player statistics have been collected yet." });
+  }
+  return interaction.editReply({ embeds: [buildLeaderboardEmbed(boards, { source: statsService.source })] });
+}
+
+async function handleCompareInteraction(interaction, { statsService }) {
+  const a = normalizeSteam64(interaction.options.getString("steamid1", true));
+  const b = normalizeSteam64(interaction.options.getString("steamid2", true));
+  if (!STEAM64.test(a) || !STEAM64.test(b)) {
+    return interaction.reply({ content: "❌ Both values must be valid 17-digit Steam64 IDs.", ephemeral: true });
+  }
+
+  await interaction.deferReply();
+  const [ra, rb] = await Promise.all([statsService.getStats(a), statsService.getStats(b)]);
+  if (!ra || !rb) {
+    return interaction.editReply({
+      content: `Compare failed:\n• A: \`${a}\` ${ra ? "✅" : "❌ not found"}\n• B: \`${b}\` ${rb ? "✅" : "❌ not found"}`,
     });
   }
 
+  const col = (s, o) => {
+    const win = (x, y, higherBetter = true) => (x === y ? "" : (x > y) === higherBetter ? " 🏆" : "");
+    return (
+      `⚔️ Kills: **${s.kills}**${win(s.kills, o.kills)}\n` +
+      `💀 Deaths: **${s.deaths}**${win(s.deaths, o.deaths, false)}\n` +
+      `📈 KDR: **${kdr(s.kills, s.deaths)}**${win(+kdr(s.kills, s.deaths), +kdr(o.kills, o.deaths))}\n` +
+      `🎯 Headshots: **${s.headshots}**${win(s.headshots, o.headshots)}\n` +
+      `⏳ Playtime: **${formatDuration(s.playtimeSeconds)}**${win(s.playtimeSeconds, o.playtimeSeconds)}`
+    );
+  };
+
   const embed = new EmbedBuilder()
-    .setColor(0xd41111)
-    .setTitle(`📊 Player Statistics: ${stats.playerName}`)
-    .setURL(`https://steamcommunity.com/profiles/${stats.steamId}`)
+    .setColor(BRAND_COLOR)
+    .setTitle("⚔️ Player Comparison")
     .addFields(
-      { name: "Kills", value: `${stats.kills}`, inline: true },
-      { name: "Deaths", value: `${stats.deaths}`, inline: true },
-      { name: "K/D Ratio", value: `${stats.kd}`, inline: true },
-      { name: "Headshots", value: `${stats.headshots}`, inline: true },
-      { name: "Playtime", value: formatPlaytime(stats.playtimeSeconds), inline: true },
-      { name: "Steam64", value: `\`${stats.steamId}\``, inline: true }
+      { name: trimName(ra.playerName, 24), value: col(ra, rb), inline: true },
+      { name: trimName(rb.playerName, 24), value: col(rb, ra), inline: true }
     )
-    .setFooter({ text: "mPanel In-Game Statistics" })
+    .setFooter({ text: "mPanel Player Stats" })
     .setTimestamp();
-
-  return interaction.reply({ embeds: [embed] });
-}
-
-async function handleRankingInteraction(interaction, { statsRepo }) {
-  const metric = interaction.options.getString("metric") || "kills";
-
-  let rows = [];
-  let title = "";
-  if (metric === "playtime") {
-    rows = statsRepo.getTopPlaytime(10);
-    title = "🏆 Top 10 Leaderboard: Playtime";
-  } else if (metric === "deaths") {
-    rows = statsRepo.getTopDeaths(10);
-    title = "💀 Top 10 Leaderboard: Deaths";
-  } else {
-    rows = statsRepo.getTopKills(10);
-    title = "⚔️ Top 10 Leaderboard: Kills";
-  }
-
-  if (rows.length === 0) {
-    return interaction.reply({ content: "No player statistics have been collected yet.", ephemeral: true });
-  }
-
-  const medalEmojis = ["🥇", "🥈", "🥉"];
-  const lines = rows.map((r, i) => {
-    const medal = medalEmojis[i] || `**${i + 1}.**`;
-    const name = r.player_name || "Unknown";
-    const profile = `[${name}](https://steamcommunity.com/profiles/${r.steam_id})`;
-
-    let val = "";
-    if (metric === "playtime") val = `${formatPlaytime(r.playtime_seconds)}`;
-    else if (metric === "deaths") val = `${r.deaths} deaths`;
-    else val = `${r.kills} kills`;
-
-    return `${medal} ${profile} — **${val}**`;
-  });
-
-  const embed = new EmbedBuilder()
-    .setColor(0xd41111)
-    .setTitle(title)
-    .setDescription(lines.join("\n"))
-    .setTimestamp();
-
-  return interaction.reply({ embeds: [embed] });
-}
-
-async function handleCompareInteraction(interaction, { statsRepo }) {
-  const sid1 = interaction.options.getString("steamid1", true).trim();
-  const sid2 = interaction.options.getString("steamid2", true).trim();
-
-  const stats1 = statsRepo.getStats(sid1);
-  const stats2 = statsRepo.getStats(sid2);
-
-  if (!stats1 && !stats2) {
-    return interaction.reply({ content: "Neither player has recorded statistics.", ephemeral: true });
-  }
-
-  const p1 = stats1 || { playerName: sid1, kills: 0, deaths: 0, kd: 0, headshots: 0, playtimeSeconds: 0 };
-  const p2 = stats2 || { playerName: sid2, kills: 0, deaths: 0, kd: 0, headshots: 0, playtimeSeconds: 0 };
-
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle(`⚔️ Player Comparison: ${p1.playerName} vs ${p2.playerName}`)
-    .addFields(
-      {
-        name: `${p1.playerName}`,
-        value:
-          `• Kills: **${p1.kills}**\n` +
-          `• Deaths: **${p1.deaths}**\n` +
-          `• K/D: **${p1.kd}**\n` +
-          `• Headshots: **${p1.headshots}**\n` +
-          `• Playtime: **${formatPlaytime(p1.playtimeSeconds)}**`,
-        inline: true,
-      },
-      {
-        name: `${p2.playerName}`,
-        value:
-          `• Kills: **${p2.kills}**\n` +
-          `• Deaths: **${p2.deaths}**\n` +
-          `• K/D: **${p2.kd}**\n` +
-          `• Headshots: **${p2.headshots}**\n` +
-          `• Playtime: **${formatPlaytime(p2.playtimeSeconds)}**`,
-        inline: true,
-      }
-    )
-    .setTimestamp();
-
-  return interaction.reply({ embeds: [embed] });
+  return interaction.editReply({ embeds: [embed] });
 }
 
 module.exports = {

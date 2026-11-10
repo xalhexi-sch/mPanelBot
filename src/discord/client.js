@@ -30,12 +30,14 @@ const { buildConsoleCommand, handleConsoleInteraction } = require("./commands/co
 const { buildStatusCommand, handleStatusInteraction } = require("./commands/status");
 
 class DiscordBotClient {
-  constructor({ token, clientId, guildRepo, linkRepo, statsRepo, snapshotRepo, moderationService, linkService }) {
+  constructor({ token, clientId, guildRepo, linkRepo, statsRepo, statsService, snapshotRepo, moderationService, linkService }) {
     this.token = token;
     this.clientId = clientId;
     this.guildRepo = guildRepo;
     this.linkRepo = linkRepo;
     this.statsRepo = statsRepo;
+    this.statsService = statsService;
+    this.livePanels = null;
     this.snapshotRepo = snapshotRepo;
     this.moderationService = moderationService;
     this.linkService = linkService;
@@ -103,6 +105,7 @@ class DiscordBotClient {
     this.client.once("ready", async () => {
       console.log(`[discord] Logged in as ${this.client.user.tag}`);
       this.updatePresence();
+      if (this.livePanels) this.livePanels.start();
 
       // Register slash commands if clientId is provided
       if (this.clientId) {
@@ -164,6 +167,8 @@ class DiscordBotClient {
       guildRepo: this.guildRepo,
       linkRepo: this.linkRepo,
       statsRepo: this.statsRepo,
+      statsService: this.statsService,
+      livePanels: this.livePanels,
       snapshotRepo: this.snapshotRepo,
       moderationService: this.moderationService,
       linkService: this.linkService,
@@ -215,6 +220,7 @@ class DiscordBotClient {
   }
 
   async stop() {
+    if (this.livePanels) this.livePanels.stop();
     return this.client.destroy();
   }
 }

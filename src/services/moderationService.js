@@ -24,6 +24,14 @@ class ModerationService {
       fullCommand: modCmd.fullCommand,
       targetSteamId: modCmd.targetSteamId,
       args: [modCmd.targetSteamId, ...(modCmd.durationMinutes ? [String(modCmd.durationMinutes)] : []), modCmd.reason],
+      wsPayload: {
+        command: modCmd.action,
+        args: {
+          targetSteamId: modCmd.targetSteamId,
+          reason: modCmd.reason,
+          ...(modCmd.durationMinutes ? { duration: String(modCmd.durationMinutes) } : {}),
+        },
+      },
       serverId,
       requestedByDiscordId,
       requestedByTag,
@@ -47,6 +55,7 @@ class ModerationService {
       fullCommand: check.sanitizedCommand,
       targetSteamId: null,
       args: check.args,
+      wsPayload: { command: "console", args: { command: check.sanitizedCommand } },
       serverId,
       requestedByDiscordId,
       requestedByTag,
@@ -58,6 +67,7 @@ class ModerationService {
     fullCommand,
     targetSteamId = null,
     args = [],
+    wsPayload = null,
     serverId = null,
     requestedByDiscordId,
     requestedByTag = null,
@@ -81,15 +91,16 @@ class ModerationService {
         type: "server.command.request",
         serverId: session.serverId,
         correlationId,
+        // Typed payload understood by the plugin's moderation module; falls back to the raw command shape.
         payload: {
-          command: fullCommand,
-          commandName,
-          targetSteamId,
-          args,
-          requestedByDiscordId,
+          ...(wsPayload || { command: fullCommand, args: { command: fullCommand } }),
+          requestedBy: requestedByDiscordId,
         },
         timeoutMs: 15000,
       });
+
+      // The plugin enforces expiry from the payload, so mirror the envelope-level value there.
+      commandEnvelope.payload.expiresAtUtc = commandEnvelope.expiresAtUtc;
 
       try {
         const resultEnvelope = await session.sendCommand(commandEnvelope, 15000);

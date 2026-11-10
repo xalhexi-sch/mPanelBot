@@ -17,10 +17,15 @@ CREATE TABLE IF NOT EXISTS guild_configs (
     guild_id TEXT PRIMARY KEY,
     raid_channel_id TEXT,
     chat_channel_id TEXT,
+    chat_webhook_url TEXT,
     join_leave_channel_id TEXT,
     command_log_channel_id TEXT,
     punishment_log_channel_id TEXT,
     linked_role_id TEXT,
+    status_channel_id TEXT,
+    status_message_id TEXT,
+    leaderboard_channel_id TEXT,
+    leaderboard_message_id TEXT,
     admin_role_ids TEXT DEFAULT '[]',
     updated_at TEXT NOT NULL
 );

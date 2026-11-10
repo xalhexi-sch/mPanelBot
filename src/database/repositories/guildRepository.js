@@ -1,110 +1,80 @@
+const { encryptText, decryptText } = require("../../utils/security");
+
+// camelCase field -> SQLite column. Single source of truth so adding a setting is a one-line change.
+const FIELD_COLUMNS = {
+  raidChannelId: "raid_channel_id",
+  chatChannelId: "chat_channel_id",
+  chatWebhookUrl: "chat_webhook_url", // stored encrypted
+  joinLeaveChannelId: "join_leave_channel_id",
+  commandLogChannelId: "command_log_channel_id",
+  punishmentLogChannelId: "punishment_log_channel_id",
+  linkedRoleId: "linked_role_id",
+  statusChannelId: "status_channel_id",
+  statusMessageId: "status_message_id",
+  leaderboardChannelId: "leaderboard_channel_id",
+  leaderboardMessageId: "leaderboard_message_id",
+  adminRoleIds: "admin_role_ids", // JSON array
+};
+
 class GuildRepository {
-  constructor(dbManager) {
+  constructor(dbManager, encryptionSecret = null) {
     this.dbManager = dbManager;
+    this.encryptionSecret = encryptionSecret;
   }
 
-  getGuildConfig(guildId) {
-    const gid = String(guildId).trim();
-    const stmt = this.dbManager.prepare("SELECT * FROM guild_configs WHERE guild_id = ?");
-    const row = stmt.get(gid);
-    if (!row) return null;
-
+  _rowToConfig(row) {
     let adminRoleIds = [];
     try {
       adminRoleIds = JSON.parse(row.admin_role_ids || "[]");
     } catch {
       adminRoleIds = [];
     }
+    const cfg = { guildId: row.guild_id, adminRoleIds, updatedAt: row.updated_at };
+    for (const [field, col] of Object.entries(FIELD_COLUMNS)) {
+      if (field === "adminRoleIds") continue;
+      cfg[field] = field === "chatWebhookUrl"
+        ? decryptText(row[col], this.encryptionSecret) || null
+        : row[col] || null;
+    }
+    return cfg;
+  }
 
-    return {
-      guildId: row.guild_id,
-      raidChannelId: row.raid_channel_id || null,
-      chatChannelId: row.chat_channel_id || null,
-      joinLeaveChannelId: row.join_leave_channel_id || null,
-      commandLogChannelId: row.command_log_channel_id || null,
-      punishmentLogChannelId: row.punishment_log_channel_id || null,
-      linkedRoleId: row.linked_role_id || null,
-      adminRoleIds,
-      updatedAt: row.updated_at,
-    };
+  getGuildConfig(guildId) {
+    const row = this.dbManager.prepare("SELECT * FROM guild_configs WHERE guild_id = ?").get(String(guildId).trim());
+    return row ? this._rowToConfig(row) : null;
   }
 
   upsertGuildConfig(guildId, updates = {}) {
     const gid = String(guildId).trim();
-    const existing = this.getGuildConfig(gid) || {
-      raidChannelId: null,
-      chatChannelId: null,
-      joinLeaveChannelId: null,
-      commandLogChannelId: null,
-      punishmentLogChannelId: null,
-      linkedRoleId: null,
-      adminRoleIds: [],
-    };
+    const existing = this.getGuildConfig(gid) || { adminRoleIds: [] };
+    const merged = { ...existing };
+    for (const field of Object.keys(FIELD_COLUMNS)) {
+      if (updates[field] !== undefined) merged[field] = updates[field];
+    }
+    merged.adminRoleIds = merged.adminRoleIds || [];
+    merged.updatedAt = new Date().toISOString();
 
-    const finalConfig = {
-      raidChannelId: updates.raidChannelId !== undefined ? updates.raidChannelId : existing.raidChannelId,
-      chatChannelId: updates.chatChannelId !== undefined ? updates.chatChannelId : existing.chatChannelId,
-      joinLeaveChannelId: updates.joinLeaveChannelId !== undefined ? updates.joinLeaveChannelId : existing.joinLeaveChannelId,
-      commandLogChannelId: updates.commandLogChannelId !== undefined ? updates.commandLogChannelId : existing.commandLogChannelId,
-      punishmentLogChannelId: updates.punishmentLogChannelId !== undefined ? updates.punishmentLogChannelId : existing.punishmentLogChannelId,
-      linkedRoleId: updates.linkedRoleId !== undefined ? updates.linkedRoleId : existing.linkedRoleId,
-      adminRoleIds: updates.adminRoleIds !== undefined ? updates.adminRoleIds : existing.adminRoleIds,
-      updatedAt: new Date().toISOString(),
-    };
+    const fields = Object.keys(FIELD_COLUMNS);
+    const cols = fields.map((f) => FIELD_COLUMNS[f]);
+    const values = fields.map((f) => {
+      if (f === "adminRoleIds") return JSON.stringify(merged.adminRoleIds);
+      if (f === "chatWebhookUrl") return encryptText(merged.chatWebhookUrl || null, this.encryptionSecret);
+      return merged[f] ?? null;
+    });
 
-    const stmt = this.dbManager.prepare(`
-      INSERT INTO guild_configs (
-        guild_id, raid_channel_id, chat_channel_id, join_leave_channel_id,
-        command_log_channel_id, punishment_log_channel_id, linked_role_id,
-        admin_role_ids, updated_at
+    this.dbManager
+      .prepare(
+        `INSERT INTO guild_configs (guild_id, ${cols.join(", ")}, updated_at)
+         VALUES (?, ${cols.map(() => "?").join(", ")}, ?)
+         ON CONFLICT(guild_id) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(", ")}, updated_at = excluded.updated_at`
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(guild_id) DO UPDATE SET
-        raid_channel_id = excluded.raid_channel_id,
-        chat_channel_id = excluded.chat_channel_id,
-        join_leave_channel_id = excluded.join_leave_channel_id,
-        command_log_channel_id = excluded.command_log_channel_id,
-        punishment_log_channel_id = excluded.punishment_log_channel_id,
-        linked_role_id = excluded.linked_role_id,
-        admin_role_ids = excluded.admin_role_ids,
-        updated_at = excluded.updated_at
-    `);
+      .run(gid, ...values, merged.updatedAt);
 
-    stmt.run(
-      gid,
-      finalConfig.raidChannelId,
-      finalConfig.chatChannelId,
-      finalConfig.joinLeaveChannelId,
-      finalConfig.commandLogChannelId,
-      finalConfig.punishmentLogChannelId,
-      finalConfig.linkedRoleId,
-      JSON.stringify(finalConfig.adminRoleIds),
-      finalConfig.updatedAt
-    );
-
-    return finalConfig;
+    return merged;
   }
 
   getAllGuildConfigs() {
-    const stmt = this.dbManager.prepare("SELECT * FROM guild_configs");
-    const rows = stmt.all();
-    return rows.map((row) => {
-      let adminRoleIds = [];
-      try {
-        adminRoleIds = JSON.parse(row.admin_role_ids || "[]");
-      } catch {}
-      return {
-        guildId: row.guild_id,
-        raidChannelId: row.raid_channel_id || null,
-        chatChannelId: row.chat_channel_id || null,
-        joinLeaveChannelId: row.join_leave_channel_id || null,
-        commandLogChannelId: row.command_log_channel_id || null,
-        punishmentLogChannelId: row.punishment_log_channel_id || null,
-        linkedRoleId: row.linked_role_id || null,
-        adminRoleIds,
-        updatedAt: row.updated_at,
-      };
-    });
+    return this.dbManager.prepare("SELECT * FROM guild_configs").all().map((r) => this._rowToConfig(r));
   }
 }
 

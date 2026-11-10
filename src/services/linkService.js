@@ -55,6 +55,8 @@ class LinkService {
           steamId: codeRecord.steamId,
           discordId: cleanDiscordId,
           playerName: codeRecord.playerName,
+          serverId: codeRecord.serverId,
+          code: cleanCode,
           guild,
         });
       } catch (err) {
@@ -66,6 +68,7 @@ class LinkService {
       success: true,
       steamId: codeRecord.steamId,
       playerName: codeRecord.playerName,
+      serverId: codeRecord.serverId,
       discordId: cleanDiscordId,
       linkedAt: linkResult.linkedAt,
     };

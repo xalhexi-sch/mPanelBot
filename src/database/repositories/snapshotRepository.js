@@ -7,7 +7,7 @@ class SnapshotRepository {
     const sid = String(serverId).trim();
     const serverName = String(snapshot.serverName || "Unturned Server").trim();
     const map = String(snapshot.map || "").trim();
-    const onlineCount = Number(snapshot.onlineCount || (snapshot.players ? snapshot.players.length : 0)) || 0;
+    const onlineCount = Number(snapshot.onlineCount ?? snapshot.onlinePlayers ?? (snapshot.players ? snapshot.players.length : 0)) || 0;
     const maxPlayers = Number(snapshot.maxPlayers || 0);
     const playersJson = JSON.stringify(Array.isArray(snapshot.players) ? snapshot.players : []);
     const nowIso = new Date().toISOString();
