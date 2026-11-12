@@ -53,6 +53,16 @@ function looksLikeSteamGroupId(id) {
 
 const cleanLabel = (name) => String(name || "").replace(/[\[\]()*_`~|>]/g, "").trim().slice(0, 64);
 
+function normalizeGroup(g) {
+  if (!g || typeof g !== "object") return null;
+  const kind = g.kind || g.Kind || "";
+  const name = g.name || g.Name || "";
+  const id = g.id || g.Id || "";
+  const url = g.url || g.Url || null;
+  if (!name && !id) return null;
+  return { kind: String(kind), name: String(name), id: String(id), url: url ? String(url) : null };
+}
+
 class DiscordLogger {
   constructor({ discordClient, guildRepo, avatars = null, snapshotRepo = null, linkRepo = null, groupWaitMs = 6000, groupRetryDelaysMs = [20_000, 90_000, 300_000] } = {}) {
     this.groupRetryDelaysMs = groupRetryDelaysMs;
@@ -175,22 +185,24 @@ class DiscordLogger {
   }
 
   /** @returns {{text:string, pending:boolean}} pending = a Steam group whose name could not be fetched yet */
-  async _formatGroupDetailed(group) {
+  async _formatGroupDetailed(rawGroup) {
+    const group = normalizeGroup(rawGroup) || rawGroup;
     const isSteam = String(group.kind || "").toLowerCase() !== "ingame";
     let name = cleanLabel(group.name);
     if (!isSteam) return { text: name || "None", pending: false };
 
     let url = group.url || null;
-    if (this.avatars && group.id && (!name || name === String(group.id))) {
-      const found = await this.avatars.getGroup(group.id).catch(() => null);
+    const gid = group.id;
+    if (this.avatars && gid && (!name || name === String(gid))) {
+      const found = await this.avatars.getGroup(gid).catch(() => null);
       if (found) {
         name = cleanLabel(found.name);
         url = found.url;
       }
     }
-    if (!url && group.id && looksLikeSteamGroupId(group.id)) url = `https://steamcommunity.com/gid/${group.id}`;
+    if (!url && gid && looksLikeSteamGroupId(gid)) url = `https://steamcommunity.com/gid/${gid}`;
 
-    if (name && name !== String(group.id)) return { text: url ? `[${name}](${url})` : name, pending: false };
+    if (name && name !== String(gid)) return { text: url ? `[${name}](${url})` : name, pending: false };
     // Name unknown for now (Steam rate-limited/unreachable). Show a placeholder; it is replaced by the real name shortly.
     return url ? { text: `[Fetching name…](${url})`, pending: true } : { text: "None", pending: false };
   }
@@ -203,11 +215,15 @@ class DiscordLogger {
     // Group: plugin sends {kind,id,name,url}; resolve a nicer Steam group name when we only have the gid
     let groupText = "None";
     let pending = false;
-    let g0 = group && (group.name || group.id) ? group : null;
+    let g0 = normalizeGroup(group);
     if (!g0 && steamId) {
       // The join event has no group; the status snapshot may need a few seconds to include a brand-new player
       const gid = await this._groupIdFor(steamId, kind === "join" && !isRetry ? this.groupWaitMs : 0);
-      if (gid && gid !== "0") g0 = { kind: "steam", id: gid };
+      if (gid && gid !== "0") {
+        g0 = { kind: "steam", id: gid };
+      } else if (profile?.primaryClanId && profile.primaryClanId !== "0") {
+        g0 = { kind: "steam", id: profile.primaryClanId };
+      }
     }
     if (g0) ({ text: groupText, pending } = await this._formatGroupDetailed(g0));
 

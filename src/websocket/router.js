@@ -112,6 +112,7 @@ class MessageRouter {
             steamId: payload.steamId,
             playerName: payload.playerName,
             ping: payload.ping,
+            group: payload.group || payload.Group,
           });
         }
         break;
@@ -124,6 +125,7 @@ class MessageRouter {
             steamId: payload.steamId,
             playerName: payload.playerName,
             durationSeconds: payload.durationSeconds ?? payload.sessionLengthSeconds,
+            group: payload.group || payload.Group,
           });
         }
         break;

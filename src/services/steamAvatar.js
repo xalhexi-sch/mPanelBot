@@ -178,6 +178,7 @@ class SteamAvatarService {
           result = {
             avatarUrl: xmlResult.avatarUrl || result?.avatarUrl || null,
             createdUnix: xmlResult.createdUnix || result?.createdUnix || null,
+            primaryClanId: xmlResult.primaryClanId || result?.primaryClanId || null,
             isEstimate: false,
           };
         }
@@ -204,9 +205,11 @@ class SteamAvatarService {
       if (!player) return null;
       const avatar = player.avatarfull || player.avatarmedium || player.avatar || null;
       const created = player.timecreated ? Number(player.timecreated) : null;
+      const primaryClanId = player.primaryclanid ? String(player.primaryclanid) : null;
       return {
         avatarUrl: /^https?:\/\//.test(avatar) ? avatar : null,
         createdUnix: created && !Number.isNaN(created) ? created : null,
+        primaryClanId,
         isEstimate: false,
       };
     } catch {
@@ -219,9 +222,11 @@ class SteamAvatarService {
     if (!xml) return null;
     const avatar = tag(xml, "avatarFull");
     const since = Date.parse(`${tag(xml, "memberSince")} UTC`);
+    const primaryClanId = tag(xml, "groupID64") || null;
     return {
       avatarUrl: /^https?:\/\//.test(avatar) ? avatar : null,
       createdUnix: Number.isNaN(since) ? null : Math.floor(since / 1000),
+      primaryClanId,
       isEstimate: false,
     };
   }
