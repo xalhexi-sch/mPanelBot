@@ -78,7 +78,7 @@ class LinkedPermissionSync {
     return Boolean(this.cfg?.enabled && this.pool);
   }
 
-  async ensureMember(steamId) {
+  async ensureMember(steamId, { quiet = false, reason = "link" } = {}) {
     if (!this.enabled) return { ok: false, reason: "disabled" };
     const sid = String(steamId || "").trim();
     if (!/^\d{17}$/.test(sid)) return { ok: false, reason: "bad_steam" };
@@ -95,6 +95,11 @@ class LinkedPermissionSync {
         `INSERT INTO ${this._table} (GroupId, SteamID, CreateDate, ExpireDate, ServerGroup) VALUES (?, ?, ?, NULL, ?)`,
         [this.cfg.groupId, sid, createDate, this.cfg.serverGroup]
       );
+      if (!quiet) {
+        this.logger.log(
+          `[linkedPerm] + ${sid} -> ${this.cfg.groupId}/${this.cfg.serverGroup} (${reason})`
+        );
+      }
       return { ok: true, action: "added" };
     } catch (err) {
       this.logger.warn(`[linkedPerm] ensureMember failed for ${sid}: ${err.message}`);
@@ -102,7 +107,7 @@ class LinkedPermissionSync {
     }
   }
 
-  async removeMember(steamId) {
+  async removeMember(steamId, { quiet = false, reason = "unlink" } = {}) {
     if (!this.enabled) return { ok: false, reason: "disabled" };
     const sid = String(steamId || "").trim();
     if (!/^\d{17}$/.test(sid)) return { ok: false, reason: "bad_steam" };
@@ -113,6 +118,11 @@ class LinkedPermissionSync {
         [this.cfg.groupId, sid, this.cfg.serverGroup]
       );
       const removed = Number(result?.affectedRows || 0);
+      if (removed > 0 && !quiet) {
+        this.logger.log(
+          `[linkedPerm] - ${sid} <- ${this.cfg.groupId}/${this.cfg.serverGroup} (${reason})`
+        );
+      }
       return { ok: true, action: removed > 0 ? "removed" : "noop", removed };
     } catch (err) {
       this.logger.warn(`[linkedPerm] removeMember failed for ${sid}: ${err.message}`);
@@ -148,14 +158,14 @@ class LinkedPermissionSync {
 
       for (const sid of linked) {
         if (inGroup.has(sid)) continue;
-        const res = await this.ensureMember(sid);
+        const res = await this.ensureMember(sid, { quiet: true, reason: "reconcile" });
         if (res.action === "added") added++;
         else if (!res.ok) errors++;
       }
 
       for (const sid of inGroup) {
         if (linked.has(sid)) continue;
-        const res = await this.removeMember(sid);
+        const res = await this.removeMember(sid, { quiet: true, reason: "reconcile" });
         if (res.action === "removed") removed++;
         else if (!res.ok) errors++;
       }
