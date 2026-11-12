@@ -15,6 +15,19 @@ class RaidNotifier {
 
   async handleRaidAlert(alert) {
     const ownerSid = alert.ownerSteamId || alert.steamId;
+    const attackerSid = alert.attackerSteamId || alert.destroyerSteamId;
+
+    // Self-destruction or friendly fire is not a raid
+    if (attackerSid && ownerSid && String(attackerSid).trim() === String(ownerSid).trim()) {
+      return;
+    }
+
+    // Charges and explosives are raiding munitions, not base structures
+    const objName = String(alert.objectName || "").trim().toLowerCase();
+    if (objName === "c4" || objName.includes("charge")) {
+      return;
+    }
+
     const pick = (...lists) => lists.find((l) => Array.isArray(l) && l.length > 0);
     const eligibleSids = [...(pick(alert.eligibleSteamIds, alert.groupMemberSteamIds, alert.onlineMemberSteamIds) || (ownerSid ? [ownerSid] : []))];
 
