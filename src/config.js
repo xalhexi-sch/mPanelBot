@@ -113,8 +113,8 @@ function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
       trustProxy: Boolean(parsed?.network?.trustProxy),
     },
     raid: {
-      // Show the raider's name and weapon in raid alerts (off by default for privacy).
-      showRaiderName: Boolean(parsed?.raid?.showRaiderName),
+      // Show the raider's name and clickable profile in raid alerts (enabled by default).
+      showRaiderName: parsed?.raid?.showRaiderName !== undefined ? Boolean(parsed.raid.showRaiderName) : true,
     },
     storage: {
       sqlitePath: process.env.SQLITE_PATH || parsed?.storage?.sqlitePath || "./data/mpanel.sqlite",

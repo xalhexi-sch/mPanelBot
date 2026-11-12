@@ -19,7 +19,7 @@
     "trustProxy": false
   },
   "raid": {
-    "showRaiderName": false
+    "showRaiderName": true
   },
   "storage": {
     "sqlitePath": "./data/mpanel.sqlite"

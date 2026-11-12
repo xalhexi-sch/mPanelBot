@@ -8,14 +8,17 @@ const ID = "76561199246661188";
 const alert = { objectName: "Metal Wall", location: "Kuwait Airport", attackerName: "Raider", attackerSteamId: ID, weapon: "C4" };
 
 describe("raid alert embed", () => {
-  it("hides the raider by default and shows it when enabled", () => {
-    const hidden = buildRaidAlertEmbed(alert).toJSON();
+  it("hides the raider when disabled and shows it when enabled", () => {
+    const hidden = buildRaidAlertEmbed(alert, { showRaider: false }).toJSON();
     assert.strictEqual(hidden.title, "🚨 Raid Alert!");
-    assert.match(hidden.description, /Metal Wall.*Kuwait Airport.*destroyed/);
+    assert.strictEqual(hidden.description, "Your **Metal Wall** near **Kuwait Airport** has been destroyed.");
     assert.strictEqual(hidden.fields, undefined);
     const shown = buildRaidAlertEmbed(alert, { showRaider: true }).toJSON();
-    assert.match(shown.fields[0].value, new RegExp(`profiles/${ID}`));
-    assert.strictEqual(shown.fields[1].value, "C4");
+    assert.strictEqual(
+      shown.description,
+      `Your **Metal Wall** near **Kuwait Airport** has been destroyed by [Raider](https://steamcommunity.com/profiles/${ID})!`
+    );
+    assert.strictEqual(shown.fields[0].value, "C4");
   });
 
   it("hides coordinate-only locations and renders the finished state", () => {

@@ -231,10 +231,10 @@ function buildPlayerStatsEmbed(s) {
 const COORDS_ONLY = /^\s*-?\d+(?:\.\d+)?\s*(?:,\s*-?\d+(?:\.\d+)?\s*){1,2}$/;
 
 /**
- * Raid alert embed (RaidAlert style). Raw coordinates are hidden; the raider is only shown when `showRaider` is on.
+ * Raid alert embed (RaidAlert style). Raw coordinates are hidden; the raider is shown with a clickable Steam profile when `showRaider` is on.
  * @param {{objectName?:string, location?:string, attackerName?:string, attackerSteamId?:string, weapon?:string, weaponName?:string}} alert
  */
-function buildRaidAlertEmbed(alert, { isFinished = false, showRaider = false } = {}) {
+function buildRaidAlertEmbed(alert, { isFinished = false, showRaider = true } = {}) {
   const rawLoc = String(alert.location || "").trim();
   const location = !rawLoc || COORDS_ONLY.test(rawLoc) ? "Unknown" : rawLoc;
 
@@ -248,18 +248,24 @@ function buildRaidAlertEmbed(alert, { isFinished = false, showRaider = false } =
   }
 
   const objectName = String(alert.objectName || "structure").trim() || "structure";
+  const attacker = String(alert.attackerName || alert.destroyerName || alert.AttackerName || alert.DestroyerName || "").trim();
+  const sid = String(alert.attackerSteamId || alert.destroyerSteamId || alert.AttackerSteamId || alert.DestroyerSteamId || "").trim();
+
+  let raiderSuffix = ".";
+  if (showRaider && attacker && attacker.toLowerCase() !== "nil") {
+    const clickable = /^\d{17}$/.test(sid) ? `[${trimName(attacker, 32)}](${steamProfile(sid)})` : trimName(attacker, 32);
+    raiderSuffix = ` by ${clickable}!`;
+  }
+
   const embed = new EmbedBuilder()
     .setColor(0xed4245)
     .setTitle("🚨 Raid Alert!")
-    .setDescription(`Your **${objectName}** near **${location}** has been destroyed.`)
+    .setDescription(`Your **${objectName}** near **${location}** has been destroyed${raiderSuffix}`)
     .setFooter({ text: "Raid Alerts" })
     .setTimestamp();
 
-  const attacker = String(alert.attackerName || "").trim();
-  if (showRaider && attacker) {
-    const sid = String(alert.attackerSteamId || "").trim();
-    embed.addFields({ name: "Destroyed by", value: /^\d{17}$/.test(sid) ? `[${trimName(attacker, 32)}](${steamProfile(sid)})` : trimName(attacker, 32), inline: true });
-    const weapon = String(alert.weapon || alert.weaponName || "").trim();
+  if (showRaider) {
+    const weapon = String(alert.weapon || alert.weaponName || alert.Weapon || alert.WeaponName || "").trim();
     if (weapon) embed.addFields({ name: "Weapon", value: weapon.slice(0, 100), inline: true });
   }
   return embed;

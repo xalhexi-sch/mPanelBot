@@ -1,7 +1,7 @@
 const { buildRaidAlertEmbed } = require("../views");
 
 class RaidNotifier {
-  constructor({ discordClient, linkRepo, guildRepo, showRaider = false }) {
+  constructor({ discordClient, linkRepo, guildRepo, showRaider = true }) {
     this.showRaider = Boolean(showRaider);
     this.client = discordClient;
     this.linkRepo = linkRepo;
