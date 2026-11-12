@@ -82,6 +82,7 @@ describe("plugin <-> bot end-to-end contract", () => {
       discordClient: { users: { fetch: async (id) => ({ send: async (m) => spies.dms.push({ id, m }) }) }, guilds: { cache: new Map(), fetch: async () => null } },
       linkRepo: { getLinkBySteam: (sid) => ({ [KILLER]: linkA, [VICTIM]: linkB })[sid] || null },
       guildRepo: { getAllGuildConfigs: () => [] },
+      showRaider: true,
     });
 
     wsServer = new GameWebSocketServer({

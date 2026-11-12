@@ -4,6 +4,7 @@ const {
   ChannelType,
   EmbedBuilder,
 } = require("discord.js");
+const { postOrRefreshLinkPanel } = require("./link");
 
 function buildSetupCommand() {
   return new SlashCommandBuilder()
@@ -51,6 +52,14 @@ function buildSetupCommand() {
         )
         .addRoleOption((o) =>
           o.setName("admin_role").setDescription("Additional role permitted to run moderation commands")
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("linkpanel")
+        .setDescription("Post the 'Link Your Steam Account' panel (button + code modal) in a channel")
+        .addChannelOption((o) =>
+          o.setName("channel").setDescription("Channel for the link panel").addChannelTypes(ChannelType.GuildText).setRequired(true)
         )
     )
     .addSubcommand((sub) =>
@@ -162,6 +171,18 @@ async function handleSetupInteraction(interaction, { guildRepo, livePanels }) {
     });
   }
 
+  if (sub === "linkpanel") {
+    const ch = interaction.options.getChannel("channel", true);
+    const me = interaction.guild?.members?.me;
+    const perms = ch.permissionsFor && me ? ch.permissionsFor(me) : null;
+    if (perms && !(perms.has(PermissionFlagsBits.ViewChannel) && perms.has(PermissionFlagsBits.SendMessages) && perms.has(PermissionFlagsBits.EmbedLinks))) {
+      return interaction.reply({ content: `❌ I need **View Channel**, **Send Messages** and **Embed Links** in <#${ch.id}>.`, ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const msg = await postOrRefreshLinkPanel(ch, guildRepo, guildId);
+    return interaction.editReply({ content: `✅ Link panel posted in <#${ch.id}>: ${msg.url}` });
+  }
+
   if (sub === "roles") {
     const linkedRole = interaction.options.getRole("linked_role");
     const adminRole = interaction.options.getRole("admin_role");
@@ -205,6 +226,7 @@ async function handleSetupInteraction(interaction, { guildRepo, livePanels }) {
         { name: "Command Logs", value: cfg.commandLogChannelId ? `<#${cfg.commandLogChannelId}>` : "*Not configured*", inline: true },
         { name: "Punishment Logs", value: cfg.punishmentLogChannelId ? `<#${cfg.punishmentLogChannelId}>` : "*Not configured*", inline: true },
         { name: "Live Status", value: cfg.statusChannelId ? `<#${cfg.statusChannelId}>` : "*Not configured*", inline: true },
+        { name: "Link Panel", value: cfg.linkChannelId ? `<#${cfg.linkChannelId}>` : "*Not configured*", inline: true },
         { name: "Live Leaderboard", value: cfg.leaderboardChannelId ? `<#${cfg.leaderboardChannelId}>` : "*Not configured*", inline: true },
         { name: "Linked Role", value: cfg.linkedRoleId ? `<@&${cfg.linkedRoleId}>` : "*Not configured*", inline: true },
         { name: "Admin Roles", value: cfg.adminRoleIds?.length ? cfg.adminRoleIds.map((r) => `<@&${r}>`).join(", ") : "*Default (Admins only)*", inline: false }

@@ -8,7 +8,8 @@ const {
 } = require("discord.js");
 
 const { buildSetupCommand, handleSetupInteraction } = require("./commands/setup");
-const { buildLinkCommand, buildUnlinkCommand, handleLinkInteraction, handleUnlinkInteraction } = require("./commands/link");
+const { buildLinkCommand, buildUnlinkCommand, handleLinkInteraction, handleUnlinkInteraction, handleLinkButton, handleLinkModal } = require("./commands/link");
+const { LINK_PANEL_BUTTON_ID, LINK_MODAL_ID } = require("./views");
 const {
   buildStatsCommand,
   buildRankingCommand,
@@ -166,8 +167,16 @@ class DiscordBotClient {
     });
 
     this.client.on("interactionCreate", async (interaction) => {
-      if (!interaction.isChatInputCommand()) return;
       try {
+        if (interaction.isButton() && interaction.customId === LINK_PANEL_BUTTON_ID) {
+          if (!this.isGuildAllowed(interaction.guildId)) return;
+          return await handleLinkButton(interaction);
+        }
+        if (interaction.isModalSubmit() && interaction.customId === LINK_MODAL_ID) {
+          if (!this.isGuildAllowed(interaction.guildId)) return;
+          return await handleLinkModal(interaction, { linkService: this.linkService });
+        }
+        if (!interaction.isChatInputCommand()) return;
         await this.handleInteraction(interaction);
       } catch (err) {
         console.warn(`[discord] interaction handler failed: ${err.message}`);

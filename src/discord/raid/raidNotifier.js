@@ -1,7 +1,8 @@
-const { EmbedBuilder } = require("discord.js");
+const { buildRaidAlertEmbed } = require("../views");
 
 class RaidNotifier {
-  constructor({ discordClient, linkRepo, guildRepo }) {
+  constructor({ discordClient, linkRepo, guildRepo, showRaider = false }) {
+    this.showRaider = Boolean(showRaider);
     this.client = discordClient;
     this.linkRepo = linkRepo;
     this.guildRepo = guildRepo;
@@ -9,39 +10,7 @@ class RaidNotifier {
   }
 
   buildRaidEmbed(alert, isFinished = false) {
-    const objectName = (alert.objectName || "structure").trim();
-    const location = (alert.location || "Unknown").trim();
-    const attacker = (alert.attackerName || "").trim();
-    const attackerSid = (alert.attackerSteamId || "").trim();
-    const weapon = (alert.weapon || alert.weaponName || "").trim();
-
-    if (isFinished) {
-      return new EmbedBuilder()
-        .setColor(0x57f287) // Green
-        .setTitle("✅ Finished Raid Alert!")
-        .setDescription(`No more damage detected on buildables near **${location}** in the last **10 minutes**.`)
-        .setTimestamp();
-    }
-
-    const embed = new EmbedBuilder()
-      .setColor(0xed4245) // Red
-      .setTitle("🚨 Raid Alert!")
-      .setDescription(`Your **${objectName}** near **${location}** is under attack or has been destroyed!`)
-      .setTimestamp();
-
-    if (attacker) {
-      const attackerVal = attackerSid
-        ? `[${attacker}](https://steamcommunity.com/profiles/${attackerSid})`
-        : attacker;
-      embed.addFields({ name: "Attacker", value: attackerVal, inline: true });
-    }
-
-    if (weapon) {
-      embed.addFields({ name: "Weapon", value: weapon, inline: true });
-    }
-
-    embed.setFooter({ text: "Raid Alerts" });
-    return embed;
+    return buildRaidAlertEmbed(alert, { isFinished, showRaider: this.showRaider });
   }
 
   async handleRaidAlert(alert) {

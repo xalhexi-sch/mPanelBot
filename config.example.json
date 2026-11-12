@@ -18,6 +18,9 @@
     "maxPayloadSizeBytes": 262144,
     "trustProxy": false
   },
+  "raid": {
+    "showRaiderName": false
+  },
   "storage": {
     "sqlitePath": "./data/mpanel.sqlite"
   },

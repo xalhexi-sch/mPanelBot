@@ -10,6 +10,8 @@ const FIELD_COLUMNS = {
   statusMessageId: "status_message_id",
   leaderboardChannelId: "leaderboard_channel_id",
   leaderboardMessageId: "leaderboard_message_id",
+  linkChannelId: "link_channel_id",
+  linkMessageId: "link_message_id",
   adminRoleIds: "admin_role_ids", // JSON array
 };
 

@@ -1,4 +1,11 @@
-const { SlashCommandBuilder } = require("discord.js");
+const { SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require("discord.js");
+const {
+  buildLinkPanelEmbed,
+  buildLinkPanelComponents,
+  buildLinkSuccessEmbed,
+  buildLinkErrorEmbed,
+  LINK_MODAL_ID,
+} = require("../views");
 
 function buildLinkCommand() {
   return new SlashCommandBuilder()
@@ -15,27 +22,54 @@ function buildUnlinkCommand() {
     .setDescription("Unlink your Steam account from Discord");
 }
 
-async function handleLinkInteraction(interaction, { linkService }) {
-  const code = interaction.options.getString("code", true);
-
+async function redeemAndReply(interaction, code, linkService) {
   await interaction.deferReply({ ephemeral: true });
+  const result = await linkService.redeemCode({ code, discordId: interaction.user.id, guild: interaction.guild });
+  if (!result.success) return interaction.editReply({ embeds: [buildLinkErrorEmbed(result.error)] });
+  return interaction.editReply({ embeds: [buildLinkSuccessEmbed(result)] });
+}
 
-  const result = await linkService.redeemCode({
-    code,
-    discordId: interaction.user.id,
-    guild: interaction.guild,
-  });
+async function handleLinkInteraction(interaction, { linkService }) {
+  return redeemAndReply(interaction, interaction.options.getString("code", true), linkService);
+}
 
-  if (!result.success) {
-    return interaction.editReply({ content: `❌ ${result.error}` });
+/** Submit of the modal opened from the link panel button. */
+async function handleLinkModal(interaction, { linkService }) {
+  return redeemAndReply(interaction, interaction.fields.getTextInputValue("code"), linkService);
+}
+
+/** Button on the link panel -> modal asking for the in-game code. */
+async function handleLinkButton(interaction) {
+  const modal = new ModalBuilder().setCustomId(LINK_MODAL_ID).setTitle("Link Steam Account").addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("code")
+        .setLabel("Enter your 6-character code")
+        .setPlaceholder("Paste the code you got from /link in-game")
+        .setStyle(TextInputStyle.Short)
+        .setMinLength(6)
+        .setMaxLength(6)
+        .setRequired(true)
+    )
+  );
+  return interaction.showModal(modal);
+}
+
+/** Posts the link panel in `channel`, or edits the previously posted one in place. Returns the message. */
+async function postOrRefreshLinkPanel(channel, guildRepo, guildId) {
+  const payload = { embeds: [buildLinkPanelEmbed()], components: buildLinkPanelComponents() };
+  const cfg = guildRepo.getGuildConfig(guildId) || {};
+  if (cfg.linkChannelId === channel.id && cfg.linkMessageId) {
+    try {
+      const existing = await channel.messages.fetch(cfg.linkMessageId);
+      return await existing.edit(payload);
+    } catch {
+      // message was deleted: fall through and post a fresh one
+    }
   }
-
-  return interaction.editReply({
-    content: `✅ Successfully linked your Steam account!\n` +
-      `• Player: **${result.playerName}**\n` +
-      `• SteamID64: \`${result.steamId}\`\n` +
-      `• Steam Profile: https://steamcommunity.com/profiles/${result.steamId}`,
-  });
+  const msg = await channel.send(payload);
+  guildRepo.upsertGuildConfig(guildId, { linkChannelId: channel.id, linkMessageId: msg.id });
+  return msg;
 }
 
 async function handleUnlinkInteraction(interaction, { linkService, roleSyncManager }) {
@@ -60,4 +94,7 @@ module.exports = {
   buildUnlinkCommand,
   handleLinkInteraction,
   handleUnlinkInteraction,
+  postOrRefreshLinkPanel,
+  handleLinkButton,
+  handleLinkModal,
 };

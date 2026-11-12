@@ -37,6 +37,8 @@ class DatabaseManager {
         "status_message_id",
         "leaderboard_channel_id",
         "leaderboard_message_id",
+        "link_channel_id",
+        "link_message_id",
       ]) {
         if (have.size > 0 && !have.has(col)) this.db.exec(`ALTER TABLE guild_configs ADD COLUMN ${col} TEXT;`);
       }

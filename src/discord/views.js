@@ -228,7 +228,91 @@ function buildPlayerStatsEmbed(s) {
     .setTimestamp();
 }
 
+const COORDS_ONLY = /^\s*-?\d+(?:\.\d+)?\s*(?:,\s*-?\d+(?:\.\d+)?\s*){1,2}$/;
+
+/**
+ * Raid alert embed (RaidAlert style). Raw coordinates are hidden; the raider is only shown when `showRaider` is on.
+ * @param {{objectName?:string, location?:string, attackerName?:string, attackerSteamId?:string, weapon?:string, weaponName?:string}} alert
+ */
+function buildRaidAlertEmbed(alert, { isFinished = false, showRaider = false } = {}) {
+  const rawLoc = String(alert.location || "").trim();
+  const location = !rawLoc || COORDS_ONLY.test(rawLoc) ? "Unknown" : rawLoc;
+
+  if (isFinished) {
+    return new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle("✅ Finished Raid Alert!")
+      .setDescription("No more damage has been done in **10 minutes** since the last alert.")
+      .setFooter({ text: "Raid Alerts" })
+      .setTimestamp();
+  }
+
+  const objectName = String(alert.objectName || "structure").trim() || "structure";
+  const embed = new EmbedBuilder()
+    .setColor(0xed4245)
+    .setTitle("🚨 Raid Alert!")
+    .setDescription(`Your **${objectName}** near **${location}** has been destroyed.`)
+    .setFooter({ text: "Raid Alerts" })
+    .setTimestamp();
+
+  const attacker = String(alert.attackerName || "").trim();
+  if (showRaider && attacker) {
+    const sid = String(alert.attackerSteamId || "").trim();
+    embed.addFields({ name: "Destroyed by", value: /^\d{17}$/.test(sid) ? `[${trimName(attacker, 32)}](${steamProfile(sid)})` : trimName(attacker, 32), inline: true });
+    const weapon = String(alert.weapon || alert.weaponName || "").trim();
+    if (weapon) embed.addFields({ name: "Weapon", value: weapon.slice(0, 100), inline: true });
+  }
+  return embed;
+}
+
+const LINK_PANEL_BUTTON_ID = "mpanel:link_account";
+const LINK_MODAL_ID = "mpanel:link_modal";
+
+function buildLinkPanelEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("🔗 Link Your Steam Account")
+    .setDescription(
+      "**Step 1** — Type `/link` **in-game** to receive a 6-character code.\n" +
+        "**Step 2** — Click **🔗 Link Account** below and paste that code.\n" +
+        "**Step 3** — You will now receive raid alerts by DM and in the server raid channel."
+    )
+    .setFooter({ text: "Codes expire after 10 minutes • DM raid alerts are ON by default after linking" });
+}
+
+function buildLinkPanelComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(LINK_PANEL_BUTTON_ID).setLabel("Link Account").setEmoji("🔗").setStyle(ButtonStyle.Primary)
+    ),
+  ];
+}
+
+function buildLinkSuccessEmbed({ playerName, steamId }) {
+  return new EmbedBuilder()
+    .setColor(0x57f287)
+    .setTitle("✅ Account Linked")
+    .setDescription(
+      `**Player name:** ${trimName(playerName, 32)}\n` +
+        `**Steam ID:** [\`${steamId}\`](${steamProfile(steamId)})\n\n` +
+        "Raid alerts in DMs are **ON** by default.\n" +
+        "Use `/unlink` any time to remove the link."
+    )
+    .setTimestamp();
+}
+
+function buildLinkErrorEmbed(message) {
+  return new EmbedBuilder().setColor(0xed4245).setTitle("❌ Could not link").setDescription(String(message).slice(0, 1000));
+}
+
 module.exports = {
+  buildRaidAlertEmbed,
+  buildLinkPanelEmbed,
+  buildLinkPanelComponents,
+  buildLinkSuccessEmbed,
+  buildLinkErrorEmbed,
+  LINK_PANEL_BUTTON_ID,
+  LINK_MODAL_ID,
   BRAND_COLOR,
   ZWS,
   trimName,

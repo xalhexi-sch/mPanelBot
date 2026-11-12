@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS guild_configs (
     status_message_id TEXT,
     leaderboard_channel_id TEXT,
     leaderboard_message_id TEXT,
+    link_channel_id TEXT,
+    link_message_id TEXT,
     admin_role_ids TEXT DEFAULT '[]',
     updated_at TEXT NOT NULL
 );

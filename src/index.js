@@ -169,6 +169,7 @@ async function main() {
     discordClient: discordBot.client,
     linkRepo,
     guildRepo,
+    showRaider: config.raid.showRaiderName,
   });
   discordBot.raidNotifier = raidNotifier;
 
