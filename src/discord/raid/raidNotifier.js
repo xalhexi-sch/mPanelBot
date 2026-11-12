@@ -17,15 +17,20 @@ class RaidNotifier {
     const ownerSid = alert.ownerSteamId || alert.steamId;
     const attackerSid = alert.attackerSteamId || alert.destroyerSteamId;
 
-    // Self-destruction or friendly fire is not a raid
-    if (attackerSid && ownerSid && String(attackerSid).trim() === String(ownerSid).trim()) {
-      return;
-    }
-
-    // Charges/C4 are ignored only when destroyed by a Detonator (raid explosion encounter)
     const objName = String(alert.objectName || "").trim().toLowerCase();
     const weapon = String(alert.weapon || alert.weaponName || "").trim().toLowerCase();
-    if ((objName === "c4" || objName.includes("charge")) && weapon.includes("detonat")) {
+    const isCharge = objName === "c4" || objName.includes("charge");
+    const isDetonator = weapon.includes("detonat");
+
+    // Self-destruction or friendly fire is not a raid (allow charges broken by non-detonator attacks for solo testing)
+    if (attackerSid && ownerSid && String(attackerSid).trim() === String(ownerSid).trim()) {
+      if (!isCharge || isDetonator) {
+        return;
+      }
+    }
+
+    // Charges/C4 are ignored when destroyed by a Detonator (raid explosion encounter)
+    if (isCharge && isDetonator) {
       return;
     }
 
