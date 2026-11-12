@@ -149,11 +149,14 @@ class DiscordBotClient {
     });
 
     this.client.on("messageCreate", async (message) => {
-      if (!this.isGuildAllowed(message.guildId)) return;
-      try {
-        if (this.chatRelay) await this.chatRelay.handleDiscordMessage(message);
-      } catch (err) {
-        console.warn(`[discord] messageCreate handler failed: ${err.message}`);
+      // DMs have no guild: only guild messages are subject to the guild policy and chat relay.
+      if (message.guildId) {
+        if (!this.isGuildAllowed(message.guildId)) return;
+        try {
+          if (this.chatRelay) await this.chatRelay.handleDiscordMessage(message);
+        } catch (err) {
+          console.warn(`[discord] messageCreate handler failed: ${err.message}`);
+        }
       }
       try {
         await handleSteamLinkMessage(message, this.steam);

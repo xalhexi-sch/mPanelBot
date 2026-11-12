@@ -40,12 +40,30 @@ describe("vanity resolution", () => {
   });
 });
 
+describe("vanity resolution via Steam Web API", () => {
+  it("uses the API first and skips the XML profile on success", async () => {
+    const urls = [];
+    const s = new SteamAvatarService({ apiKey: "KEY", sleep: noSleep, minGapMs: 0, fetchImpl: async (u) => (urls.push(u), res(200, JSON.stringify({ response: { success: 1, steamid: ID } }))) });
+    assert.strictEqual(await s.resolveVanity("Foo"), ID);
+    assert.strictEqual(urls.length, 1);
+    assert.match(urls[0], /ResolveVanityURL\/v0001\/\?key=KEY&vanityurl=foo$/);
+  });
+
+  it("falls back to XML, then HTML, when the API fails", async () => {
+    const mk = (xmlBody, htmlBody) => new SteamAvatarService({ apiKey: "KEY", sleep: noSleep, minGapMs: 0, fetchImpl: async (u) =>
+      u.includes("api.steampowered") ? res(200, JSON.stringify({ response: { success: 42 } })) : u.endsWith("?xml=1") ? res(200, xmlBody) : res(200, htmlBody) });
+    assert.strictEqual(await mk(`<steamID64>${ID}</steamID64>`, "").resolveVanity("foo"), ID);
+    assert.strictEqual(await mk("", `g_rgProfileData = {"steamid":"${ID}"}`).resolveVanity("foo"), ID);
+    assert.strictEqual(await mk("", "").resolveVanity("foo"), null);
+  });
+});
+
 describe("steam link replies", () => {
   const steam = { resolveVanity: async (v) => (v === "good" ? ID : null) };
 
   it("answers numeric links without any lookup and reports failures per link", async () => {
     const reply = await buildSteamLinkReply(`https://steamcommunity.com/profiles/${ID} https://steamcommunity.com/id/good https://steamcommunity.com/id/bad`, steam);
-    assert.strictEqual(reply, [`**${ID}** → \`${ID}\``, `**good** → \`${ID}\``, "❌ **bad** → couldn't resolve a Steam64 ID"].join("\n"));
+    assert.strictEqual(reply, [ID, ID, "bad not found"].join("\n"));
   });
 
   it("does not reply to bots, webhooks, DMs or messages without links", async () => {
@@ -53,10 +71,12 @@ describe("steam link replies", () => {
     const msg = (extra) => ({ guildId: "g", author: {}, content: `https://steamcommunity.com/profiles/${ID}`, reply: async (t) => sent.push(t), ...extra });
     await handleSteamLinkMessage(msg({ author: { bot: true } }), steam);
     await handleSteamLinkMessage(msg({ webhookId: "w" }), steam);
-    await handleSteamLinkMessage(msg({ guildId: null }), steam);
     await handleSteamLinkMessage(msg({ content: "hello" }), steam);
     assert.strictEqual(sent.length, 0);
     await handleSteamLinkMessage(msg(), steam);
     assert.strictEqual(sent.length, 1);
+    await handleSteamLinkMessage(msg({ guildId: null }), steam); // DMs work too
+    assert.strictEqual(sent.length, 2);
+    assert.strictEqual(sent[0].content, ID);
   });
 });

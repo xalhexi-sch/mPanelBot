@@ -1,3 +1,8 @@
+// Load .env (e.g. STEAM_API_KEY) if present; real environment variables win.
+try {
+  process.loadEnvFile();
+} catch {}
+
 const { loadConfig } = require("./config");
 const { DatabaseManager } = require("./database");
 const { LinkRepository } = require("./database/repositories/linkRepository");

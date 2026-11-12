@@ -29,6 +29,7 @@ class SteamAvatarService {
     timeoutMs = 4000,
     minGapMs = 1200,
     groupStore = null,
+    apiKey = "",
     now = Date.now,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   } = {}) {
@@ -36,6 +37,7 @@ class SteamAvatarService {
     this.timeoutMs = timeoutMs;
     this.minGapMs = minGapMs;
     this.groupStore = groupStore;
+    this.apiKey = apiKey;
     this.now = now;
     this.sleep = sleep;
     this.profiles = new Map(); // steamId -> { value, expires }
@@ -123,12 +125,36 @@ class SteamAvatarService {
     if (hit && hit.expires > this.now()) return hit.value;
 
     return this._dedupe(`v:${name}`, async () => {
-      const xml = await this._xml(`https://steamcommunity.com/id/${name}?xml=1`);
-      if (!xml) return this._remember(this.vanities, name, null, FAIL_TTL_MS);
-      const id = tag(xml, "steamID64");
-      const value = /^\d{17}$/.test(id) ? id : null;
+      const value = (await this._vanityViaApi(name)) || (await this._vanityViaXml(name)) || (await this._vanityViaHtml(name));
       return this._remember(this.vanities, name, value, value ? OK_TTL_MS : FAIL_TTL_MS);
     });
+  }
+
+  /** Steam Web API ResolveVanityURL; needs STEAM_API_KEY (constructor `apiKey` or env). */
+  async _vanityViaApi(name) {
+    const key = String(this.apiKey || process.env.STEAM_API_KEY || "").trim();
+    if (!key) return null;
+    const url = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key=${encodeURIComponent(key)}&vanityurl=${encodeURIComponent(name)}`;
+    const body = await this._xml(url);
+    if (!body) return null;
+    try {
+      const r = JSON.parse(body)?.response;
+      return r?.success === 1 && /^\d{17}$/.test(String(r.steamid)) ? String(r.steamid) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async _vanityViaXml(name) {
+    const xml = await this._xml(`https://steamcommunity.com/id/${name}?xml=1`);
+    const id = xml ? tag(xml, "steamID64") : "";
+    return /^\d{17}$/.test(id) ? id : null;
+  }
+
+  async _vanityViaHtml(name) {
+    const html = await this._xml(`https://steamcommunity.com/id/${name}`);
+    const m = html?.match(/"steamid"\s*:\s*"(\d{17})"/i);
+    return m ? m[1] : null;
   }
 
   /** Back-compat: just the avatar URL. */

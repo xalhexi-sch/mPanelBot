@@ -1,7 +1,7 @@
 /**
- * Replies with the Steam64 ID for any steamcommunity.com profile link posted in a channel.
+ * Replies with the bare Steam64 ID for every steamcommunity.com profile link in a message (servers and DMs).
  * Numeric `/profiles/<id>` links need no lookup; `/id/<vanity>` links are resolved through SteamAvatarService
- * (public XML profile, throttled and cached, no API key).
+ * (Steam Web API first, then XML profile, then HTML scrape). Output is plain text, one ID per line.
  */
 const MAX_LINKS_PER_MESSAGE = 5;
 
@@ -23,7 +23,7 @@ function extractSteamLinks(content, limit = MAX_LINKS_PER_MESSAGE) {
   return links;
 }
 
-/** Builds the reply text, or null when the message has no Steam profile links. */
+/** Builds the reply text (plain, one line per link), or null when the message has no Steam profile links. */
 async function buildSteamLinkReply(content, steam) {
   const links = extractSteamLinks(content);
   if (!links.length) return null;
@@ -38,16 +38,16 @@ async function buildSteamLinkReply(content, steam) {
         id = null;
       }
     }
-    lines.push(id ? `**${link.label}** → \`${id}\`` : `❌ **${link.label}** → couldn't resolve a Steam64 ID`);
+    lines.push(id || `${link.label} not found`);
   }
   return lines.join("\n");
 }
 
-/** Never throws; ignores bots, webhooks and DMs (chat-relay loop prevention rules apply here too). */
+/** Never throws; ignores bots and webhooks (chat-relay loop prevention rules apply here too). */
 async function handleSteamLinkMessage(message, steam) {
-  if (!steam || !message.guildId || message.author?.bot || message.webhookId) return;
+  if (!steam || message.author?.bot || message.webhookId) return;
   const reply = await buildSteamLinkReply(message.content, steam);
-  if (reply) await message.reply(reply);
+  if (reply) await message.reply({ content: reply, allowedMentions: { parse: [], repliedUser: false } });
 }
 
 module.exports = { extractSteamLinks, buildSteamLinkReply, handleSteamLinkMessage, MAX_LINKS_PER_MESSAGE };
