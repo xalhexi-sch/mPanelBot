@@ -52,6 +52,13 @@
       "clientApiToken": "YOUR_PTERODACTYL_CLIENT_API_KEY",
       "serverIdentifier": "YOUR_PTERODACTYL_SERVER_ID",
       "mpanelServerId": "survival-1"
+    },
+    "linkedPermission": {
+      "enabled": false,
+      "groupId": "linked",
+      "serverGroup": "PVP",
+      "table": "PermissionGroupMembers",
+      "reconcileIntervalMs": 300000
     }
   }
 }

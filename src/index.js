@@ -18,6 +18,7 @@ const { createHealthServer } = require("./http/healthServer");
 const { PterodactylClient } = require("./pterodactyl/client");
 
 const { LinkService } = require("./services/linkService");
+const { LinkedPermissionSync } = require("./services/linkedPermissionSync");
 const { ModerationService } = require("./services/moderationService");
 
 const { DiscordBotClient } = require("./discord/client");
@@ -103,6 +104,24 @@ async function main() {
     pterodactylServerId: config.integrations.pterodactyl.mpanelServerId || null,
   });
 
+  const linkedPermissionSync = new LinkedPermissionSync({
+    mysqlConfig: config.integrations.mysql,
+    linkedConfig: config.integrations.linkedPermission,
+    linkRepo,
+  });
+  if (linkedPermissionSync.enabled) {
+    console.log(
+      `[linkedPerm] Syncing Discord links -> MySQL ${config.integrations.linkedPermission.table}` +
+        ` group=${config.integrations.linkedPermission.groupId}` +
+        ` serverGroup=${config.integrations.linkedPermission.serverGroup}`
+    );
+    linkedPermissionSync.startPeriodicReconcile();
+  } else if (config.integrations.linkedPermission?.enabled) {
+    console.warn(
+      "[linkedPerm] linkedPermission.enabled is set but MySQL is disabled or groupId is empty — sync off."
+    );
+  }
+
   let roleSyncManager = null;
   const linkService = new LinkService({
     linkRepo,
@@ -117,11 +136,20 @@ async function main() {
         console.warn(`[link] Could not notify game server: ${err.message}`);
       }
 
+      if (linkedPermissionSync.enabled) {
+        await linkedPermissionSync.ensureMember(steamId);
+      }
+
       if (roleSyncManager && guild) {
         const member = await guild.members.fetch(discordId).catch(() => null);
         if (member) {
           await roleSyncManager.syncMember(member);
         }
+      }
+    },
+    onUnlinkCompleted: async ({ steamId }) => {
+      if (linkedPermissionSync.enabled) {
+        await linkedPermissionSync.removeMember(steamId);
       }
     },
   });
@@ -257,6 +285,7 @@ async function main() {
       wsServer.close();
       healthServer.close();
       await discordBot.stop().catch(() => {});
+      await linkedPermissionSync.close().catch(() => {});
       await statsService.close().catch(() => {});
       dbManager.close();
       console.log("[system] Shutdown complete. Goodbye!");

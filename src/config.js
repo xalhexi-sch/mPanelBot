@@ -30,6 +30,18 @@ function loadMysqlConfig(m = {}) {
   };
 }
 
+/** Sync Discord-linked Steam IDs into MySQL PermissionGroupMembers (same DB as stats). */
+function loadLinkedPermissionConfig(raw = {}) {
+  const c = raw || {};
+  return {
+    enabled: Boolean(c.enabled),
+    groupId: String(c.groupId || "").trim(),
+    serverGroup: String(c.serverGroup || "PVP").trim() || "PVP",
+    table: String(c.table || "PermissionGroupMembers").trim() || "PermissionGroupMembers",
+    reconcileIntervalMs: Math.max(60_000, Number(c.reconcileIntervalMs) || 5 * 60_000),
+  };
+}
+
 /** Warns when config.json (tokens/passwords) is readable by other users on this machine. */
 function warnIfConfigExposed(configPath) {
   try {
@@ -133,8 +145,9 @@ function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
         // The mPanel ServerId this Pterodactyl server corresponds to; the console fallback only runs for that server.
         mpanelServerId: parsed?.integrations?.pterodactyl?.mpanelServerId || null,
       },
+      linkedPermission: loadLinkedPermissionConfig(parsed?.integrations?.linkedPermission),
     },
   };
 }
 
-module.exports = { loadConfig, DEFAULT_CONFIG_PATH };
+module.exports = { loadConfig, loadLinkedPermissionConfig, DEFAULT_CONFIG_PATH };

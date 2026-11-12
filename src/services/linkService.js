@@ -1,7 +1,15 @@
 class LinkService {
-  constructor({ linkRepo, onLinkCompleted = null, maxBadAttempts = 5, lockoutMs = 10 * 60_000, now = Date.now }) {
+  constructor({
+    linkRepo,
+    onLinkCompleted = null,
+    onUnlinkCompleted = null,
+    maxBadAttempts = 5,
+    lockoutMs = 10 * 60_000,
+    now = Date.now,
+  }) {
     this.linkRepo = linkRepo;
     this.onLinkCompleted = onLinkCompleted;
+    this.onUnlinkCompleted = onUnlinkCompleted;
     this.maxBadAttempts = maxBadAttempts;
     this.lockoutMs = lockoutMs;
     this.now = now;
@@ -109,14 +117,32 @@ class LinkService {
     };
   }
 
-  unlink({ discordId, steamId }) {
+  async unlink({ discordId, steamId }) {
+    let existing = null;
     if (discordId) {
-      return this.linkRepo.unlinkByDiscord(discordId);
+      existing = this.linkRepo.getLinkByDiscord(discordId);
+      if (!existing) return null;
+      this.linkRepo.unlinkByDiscord(discordId);
+    } else if (steamId) {
+      existing = this.linkRepo.getLinkBySteam(steamId);
+      if (!existing) return null;
+      this.linkRepo.unlinkBySteam(steamId);
+    } else {
+      return null;
     }
-    if (steamId) {
-      return this.linkRepo.unlinkBySteam(steamId);
+
+    if (typeof this.onUnlinkCompleted === "function") {
+      try {
+        await this.onUnlinkCompleted({
+          steamId: existing.steam_id,
+          discordId: existing.discord_id,
+        });
+      } catch (err) {
+        console.warn(`[linkService] Unlink hook error: ${err.message}`);
+      }
     }
-    return false;
+
+    return existing;
   }
 }
 

@@ -217,6 +217,27 @@ SQLite (fed by plugin events) is the default. To show stats from a legacy MySQL 
 }
 ```
 
+## Optional: sync Discord links into MySQL `PermissionGroupMembers`
+
+When a player `/link`s, the bot inserts their Steam64 into `PermissionGroupMembers` for a configured group (permanent: `ExpireDate` NULL). `/unlink` deletes only that group row (other ranks like `captain` are untouched). A periodic reconcile diffs SQLite `account_links` against MySQL so nothing drifts.
+
+This uses the **same MySQL credentials** as stats (needs INSERT/DELETE on that table — not a read-only user). Prefer this over console `/padd` / `/premove` (no command spam; idempotent).
+
+```json
+"integrations": {
+  "mysql": { "enabled": true, "host": "127.0.0.1", "port": 3306, "user": "mpanel", "password": "CHANGE_ME", "database": "unturned" },
+  "linkedPermission": {
+    "enabled": true,
+    "groupId": "linked",
+    "serverGroup": "PVP",
+    "table": "PermissionGroupMembers",
+    "reconcileIntervalMs": 300000
+  }
+}
+```
+
+Create the Rocket/permission group named in `groupId` first. Players may need to rejoin for in-game perms to refresh if the permissions plugin caches membership in memory.
+
 ## Tests
 
 `npm test` runs unit tests plus `test/e2e.test.js`, which drives the real WebSocket server with a fake plugin client

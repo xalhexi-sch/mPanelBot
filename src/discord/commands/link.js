@@ -75,7 +75,7 @@ async function postOrRefreshLinkPanel(channel, guildRepo, guildId) {
 async function handleUnlinkInteraction(interaction, { linkService, roleSyncManager }) {
   await interaction.deferReply({ ephemeral: true });
 
-  const unlinked = linkService.unlink({ discordId: interaction.user.id });
+  const unlinked = await linkService.unlink({ discordId: interaction.user.id });
   if (!unlinked) {
     return interaction.editReply({ content: "⚠️ You do not have a linked Steam account." });
   }

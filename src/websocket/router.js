@@ -179,7 +179,7 @@ class MessageRouter {
 
       case "player.unlinked":
         if (this.linkService && payload.steamId) {
-          this.linkService.unlink({ steamId: payload.steamId });
+          await this.linkService.unlink({ steamId: payload.steamId });
         }
         break;
 
