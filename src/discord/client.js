@@ -30,10 +30,12 @@ const {
 } = require("./commands/moderation");
 const { buildConsoleCommand, handleConsoleInteraction } = require("./commands/console");
 const { buildStatusCommand, handleStatusInteraction } = require("./commands/status");
+const { handleSteamLinkMessage } = require("./steamLinks");
 
 class DiscordBotClient {
-  constructor({ token, clientId, guildPolicy = null, guildRepo, linkRepo, statsRepo, statsService, snapshotRepo, moderationService, linkService }) {
+  constructor({ token, clientId, guildPolicy = null, guildRepo, linkRepo, statsRepo, statsService, snapshotRepo, moderationService, linkService, steam = null }) {
     this.token = token;
+    this.steam = steam;
     this.clientId = clientId;
     this.guildPolicy = guildPolicy;
     this._lastActivity = null;
@@ -147,12 +149,16 @@ class DiscordBotClient {
     });
 
     this.client.on("messageCreate", async (message) => {
+      if (!this.isGuildAllowed(message.guildId)) return;
       try {
-        if (this.chatRelay && this.isGuildAllowed(message.guildId)) {
-          await this.chatRelay.handleDiscordMessage(message);
-        }
+        if (this.chatRelay) await this.chatRelay.handleDiscordMessage(message);
       } catch (err) {
         console.warn(`[discord] messageCreate handler failed: ${err.message}`);
+      }
+      try {
+        await handleSteamLinkMessage(message, this.steam);
+      } catch (err) {
+        console.warn(`[discord] steam link reply failed: ${err.message}`);
       }
     });
 

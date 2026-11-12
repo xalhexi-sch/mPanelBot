@@ -1,5 +1,5 @@
 /**
- * Public Steam Community lookups (no API key): profile avatar, account creation date, and group names.
+ * Public Steam Community lookups (no API key): profile avatar, account creation date, group names, vanity -> Steam64.
  *
  * Steam rate-limits anonymous community requests per IP (HTTP 429), so this service is deliberately polite:
  *  - requests are spaced out (`minGapMs`) and run one at a time,
@@ -40,6 +40,7 @@ class SteamAvatarService {
     this.sleep = sleep;
     this.profiles = new Map(); // steamId -> { value, expires }
     this.groups = new Map(); // groupId -> { value, expires }
+    this.vanities = new Map(); // vanity -> { value, expires }
     this.pending = new Map();
     this.chain = Promise.resolve(); // serialises network calls
     this.lastRequestAt = 0;
@@ -106,6 +107,27 @@ class SteamAvatarService {
         createdUnix: Number.isNaN(since) ? null : Math.floor(since / 1000),
       };
       return this._remember(this.profiles, id, value, value.avatarUrl ? OK_TTL_MS : FAIL_TTL_MS);
+    });
+  }
+
+  /**
+   * Resolve a vanity name (steamcommunity.com/id/<vanity>) to a Steam64 ID via the public XML profile (no API key).
+   * Shares the throttling / 429 backoff / caching of every other lookup. Definitive "no such profile" answers are
+   * cached like successes; outages are only negatively cached briefly.
+   * @returns {Promise<string|null>}
+   */
+  async resolveVanity(vanity) {
+    const name = String(vanity || "").trim().toLowerCase();
+    if (!/^[a-z0-9_-]{2,64}$/.test(name)) return null;
+    const hit = this.vanities.get(name);
+    if (hit && hit.expires > this.now()) return hit.value;
+
+    return this._dedupe(`v:${name}`, async () => {
+      const xml = await this._xml(`https://steamcommunity.com/id/${name}?xml=1`);
+      if (!xml) return this._remember(this.vanities, name, null, FAIL_TTL_MS);
+      const id = tag(xml, "steamID64");
+      const value = /^\d{17}$/.test(id) ? id : null;
+      return this._remember(this.vanities, name, value, value ? OK_TTL_MS : FAIL_TTL_MS);
     });
   }
 

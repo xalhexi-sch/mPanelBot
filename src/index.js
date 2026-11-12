@@ -137,6 +137,7 @@ async function main() {
     snapshotRepo,
     moderationService,
     linkService,
+    steam: avatars,
   });
 
   discordBot.livePanels = new LivePanels({
