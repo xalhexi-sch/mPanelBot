@@ -261,9 +261,13 @@ function buildRaidAlertEmbed(alert, { isFinished = false, showRaider = true, rec
   const ownerSid = String(alert.ownerSteamId || alert.steamId || "").trim();
   const isRecipientOwner = Boolean(recipientSteamId && ownerSid && String(recipientSteamId).trim() === ownerSid);
 
-  const subject = (ownerName && !isRecipientOwner)
-    ? `**${trimName(ownerName, 24)}'s**`
-    : "Your";
+  let subject = "Your";
+  if (ownerName && !isRecipientOwner) {
+    const clickableOwner = /^\d{17}$/.test(ownerSid)
+      ? `[${trimName(ownerName, 24)}](${steamProfile(ownerSid)})`
+      : `**${trimName(ownerName, 24)}**`;
+    subject = `${clickableOwner}'s`;
+  }
 
   const embed = new EmbedBuilder()
     .setColor(0xed4245)

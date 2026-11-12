@@ -149,10 +149,10 @@ describe("RaidNotifier Filter & Delivery Rules", () => {
     // Teammate's DM
     const teammateDm = sentDms.find((d) => d.id === "234567890123456789");
     assert.ok(teammateDm);
-    assert.match(teammateDm.payload.embeds[0].data.description, /^\*\*Bob's\*\* \*\*Pine Wall\*\*/);
+    assert.match(teammateDm.payload.embeds[0].data.description, /^\[Bob\]\(https:\/\/steamcommunity\.com\/profiles\/76561198000000001\)'s \*\*Pine Wall\*\*/);
 
     // Channel
     assert.equal(sentChannels.length, 1);
-    assert.match(sentChannels[0].payload.embeds[0].data.description, /^\*\*Bob's\*\* \*\*Pine Wall\*\*/);
+    assert.match(sentChannels[0].payload.embeds[0].data.description, /^\[Bob\]\(https:\/\/steamcommunity\.com\/profiles\/76561198000000001\)'s \*\*Pine Wall\*\*/);
   });
 });
