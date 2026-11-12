@@ -132,7 +132,7 @@ class SteamAvatarService {
 
   /** Steam Web API ResolveVanityURL; needs STEAM_API_KEY (constructor `apiKey` or env). */
   async _vanityViaApi(name) {
-    const key = String(this.apiKey || process.env.STEAM_API_KEY || "").trim();
+    const key = String(this.apiKey || "").trim();
     if (!key) return null;
     const url = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key=${encodeURIComponent(key)}&vanityurl=${encodeURIComponent(name)}`;
     const body = await this._xml(url);

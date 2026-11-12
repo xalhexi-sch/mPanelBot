@@ -1,8 +1,3 @@
-// Load .env (e.g. STEAM_API_KEY) if present; real environment variables win.
-try {
-  process.loadEnvFile();
-} catch {}
-
 const { loadConfig } = require("./config");
 const { DatabaseManager } = require("./database");
 const { LinkRepository } = require("./database/repositories/linkRepository");
@@ -52,7 +47,8 @@ async function main() {
   const linkRepo = new LinkRepository(dbManager);
   const dedupeRepo = new DedupeRepository(dbManager);
   const statsRepo = new StatsRepository(dbManager);
-  const avatars = new SteamAvatarService({ groupStore: new SteamGroupRepository(dbManager) });
+  if (!config.integrations.steam.apiKey) console.warn("STEAM_API_KEY missing - vanity links will fail");
+  const avatars = new SteamAvatarService({ groupStore: new SteamGroupRepository(dbManager), apiKey: config.integrations.steam.apiKey });
   const statsService = new StatsService({ statsRepo, mysqlConfig: config.integrations.mysql });
   console.log(`[stats] Player stats source: ${statsService.source}`);
   const guildRepo = new GuildRepository(dbManager);

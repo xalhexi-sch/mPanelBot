@@ -40,6 +40,9 @@
         "playtime": "Playtime"
       }
     },
+    "steam": {
+      "apiKey": "YOUR_STEAM_WEB_API_KEY"
+    },
     "pterodactyl": {
       "enabled": false,
       "panelUrl": "https://panel.example.com",

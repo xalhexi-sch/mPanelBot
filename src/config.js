@@ -117,6 +117,10 @@ function loadConfig(configPath = DEFAULT_CONFIG_PATH) {
     },
     integrations: {
       mysql: loadMysqlConfig(parsed?.integrations?.mysql),
+      steam: {
+        // Steam Web API key (STEAM_API_KEY); used first for vanity-link resolution.
+        apiKey: String(parsed?.integrations?.steam?.apiKey || "").trim().replace(/^YOUR_STEAM_WEB_API_KEY$/, ""),
+      },
       pterodactyl: {
         enabled: process.env.PTERO_ENABLED ? process.env.PTERO_ENABLED === "true" : Boolean(parsed?.integrations?.pterodactyl?.enabled),
         panelUrl: (process.env.PTERO_PANEL_URL || parsed?.integrations?.pterodactyl?.panelUrl || "").replace(/\/$/, ""),
