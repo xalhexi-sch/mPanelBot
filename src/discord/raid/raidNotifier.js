@@ -9,8 +9,8 @@ class RaidNotifier {
     this.recentAlerts = new Map(); // key -> timestamp
   }
 
-  buildRaidEmbed(alert, isFinished = false) {
-    return buildRaidAlertEmbed(alert, { isFinished, showRaider: this.showRaider });
+  buildRaidEmbed(alert, isFinished = false, recipientSteamId = null) {
+    return buildRaidAlertEmbed(alert, { isFinished, showRaider: this.showRaider, recipientSteamId });
   }
 
   async handleRaidAlert(alert) {
@@ -64,7 +64,6 @@ class RaidNotifier {
 
     if (targets.size === 0) return;
 
-    const embed = this.buildRaidEmbed(alert, isFinished);
     const targetDiscordIds = Array.from(targets.keys());
 
     // 1. Direct Messages
@@ -73,13 +72,15 @@ class RaidNotifier {
         try {
           const user = await this.client.users.fetch(did).catch(() => null);
           if (user) {
-            await user.send({ embeds: [embed] }).catch(() => {});
+            const dmEmbed = this.buildRaidEmbed(alert, isFinished, info.steamId);
+            await user.send({ embeds: [dmEmbed] }).catch(() => {});
           }
         } catch {}
       }
     }
 
-    // 2. Guild Raid Channels
+    // 2. Guild Raid Channels (shows builder's name in third-person if available)
+    const channelEmbed = this.buildRaidEmbed(alert, isFinished, null);
     const mentions = targetDiscordIds.map((id) => `<@${id}>`).join(" ");
     const guildConfigs = this.guildRepo.getAllGuildConfigs();
 
@@ -93,7 +94,7 @@ class RaidNotifier {
         if (channel && channel.isTextBased()) {
           await channel.send({
             content: mentions,
-            embeds: [embed],
+            embeds: [channelEmbed],
             allowedMentions: { users: targetDiscordIds.map(String).filter((id) => /^\d{5,25}$/.test(id)).slice(0, 100) },
           });
         }

@@ -50,7 +50,7 @@ describe("RaidNotifier Filter & Delivery Rules", () => {
 
     const links = new Map([
       ["76561198000000001", { steam_id: "76561198000000001", discord_id: "123456789012345678", raid_alerts_dm: 1 }],
-      ["76561198000000002", { steam_id: "76561198000000002", discord_id: "234567890123456789", raid_alerts_dm: 0 }],
+      ["76561198000000002", { steam_id: "76561198000000002", discord_id: "234567890123456789", raid_alerts_dm: 1 }],
     ]);
 
     const mockLinkRepo = {
@@ -126,18 +126,33 @@ describe("RaidNotifier Filter & Delivery Rules", () => {
     assert.equal(sentChannels.length, 1);
   });
 
-  it("should trigger alert when enemy destroys base structure with Detonator", async () => {
+  it("should personalize description with Your for builder and Bob's for teammates and channel", async () => {
     const { notifier, sentDms, sentChannels } = createHarness();
 
     await notifier.handleRaidAlert({
       ownerSteamId: "76561198000000001",
-      attackerSteamId: "76561198000000002",
-      objectName: "Metal Door",
-      weapon: "Detonator",
+      ownerName: "Bob",
+      eligibleSteamIds: ["76561198000000001", "76561198000000002"],
+      attackerSteamId: "76561198000000099",
+      attackerName: "Raider",
+      objectName: "Pine Wall",
+      weapon: "Timberwolf",
       location: "Farmstead",
     });
 
-    assert.equal(sentDms.length, 1);
+    assert.equal(sentDms.length, 2);
+    // Bob's DM
+    const bobDm = sentDms.find((d) => d.id === "123456789012345678");
+    assert.ok(bobDm);
+    assert.match(bobDm.payload.embeds[0].data.description, /^Your \*\*Pine Wall\*\*/);
+
+    // Teammate's DM
+    const teammateDm = sentDms.find((d) => d.id === "234567890123456789");
+    assert.ok(teammateDm);
+    assert.match(teammateDm.payload.embeds[0].data.description, /^\*\*Bob's\*\* \*\*Pine Wall\*\*/);
+
+    // Channel
     assert.equal(sentChannels.length, 1);
+    assert.match(sentChannels[0].payload.embeds[0].data.description, /^\*\*Bob's\*\* \*\*Pine Wall\*\*/);
   });
 });

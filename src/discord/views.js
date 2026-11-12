@@ -234,7 +234,7 @@ const COORDS_ONLY = /^\s*-?\d+(?:\.\d+)?\s*(?:,\s*-?\d+(?:\.\d+)?\s*){1,2}$/;
  * Raid alert embed (RaidAlert style). Raw coordinates are hidden; the raider is shown with a clickable Steam profile when `showRaider` is on.
  * @param {{objectName?:string, location?:string, attackerName?:string, attackerSteamId?:string, weapon?:string, weaponName?:string}} alert
  */
-function buildRaidAlertEmbed(alert, { isFinished = false, showRaider = true } = {}) {
+function buildRaidAlertEmbed(alert, { isFinished = false, showRaider = true, recipientSteamId = null } = {}) {
   const rawLoc = String(alert.location || "").trim();
   const location = !rawLoc || COORDS_ONLY.test(rawLoc) ? "Unknown" : rawLoc;
 
@@ -257,10 +257,18 @@ function buildRaidAlertEmbed(alert, { isFinished = false, showRaider = true } = 
     raiderSuffix = ` by ${clickable}!`;
   }
 
+  const ownerName = String(alert.ownerName || alert.OwnerName || "").trim();
+  const ownerSid = String(alert.ownerSteamId || alert.steamId || "").trim();
+  const isRecipientOwner = Boolean(recipientSteamId && ownerSid && String(recipientSteamId).trim() === ownerSid);
+
+  const subject = (ownerName && !isRecipientOwner)
+    ? `**${trimName(ownerName, 24)}'s**`
+    : "Your";
+
   const embed = new EmbedBuilder()
     .setColor(0xed4245)
     .setTitle("🚨 Raid Alert!")
-    .setDescription(`Your **${objectName}** near **${location}** has been destroyed${raiderSuffix}`)
+    .setDescription(`${subject} **${objectName}** near **${location}** has been destroyed${raiderSuffix}`)
     .setFooter({ text: "Raid Alerts" })
     .setTimestamp();
 
