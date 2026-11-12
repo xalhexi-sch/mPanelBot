@@ -1,6 +1,6 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
-const { SteamAvatarService } = require("../src/services/steamAvatar");
+const { SteamAvatarService, estimateSteamAccountAge } = require("../src/services/steamAvatar");
 const { extractSteamLinks, buildSteamLinkReply, handleSteamLinkMessage } = require("../src/discord/steamLinks");
 
 const ID = "76561199246661188";
@@ -78,5 +78,73 @@ describe("steam link replies", () => {
     await handleSteamLinkMessage(msg({ guildId: null }), steam); // DMs work too
     assert.strictEqual(sent.length, 2);
     assert.strictEqual(sent[0].content, ID);
+  });
+});
+
+describe("profile lookup via Steam Web API", () => {
+  it("fetches avatar and createdUnix via GetPlayerSummaries when apiKey is set", async () => {
+    const urls = [];
+    const s = new SteamAvatarService({
+      apiKey: "SECRET_KEY",
+      sleep: noSleep,
+      minGapMs: 0,
+      fetchImpl: async (u) => {
+        urls.push(u);
+        return res(200, JSON.stringify({
+          response: {
+            players: [
+              {
+                steamid: ID,
+                avatarfull: "https://avatars.steamstatic.com/test_full.jpg",
+                timecreated: 1645833600,
+              },
+            ],
+          },
+        }));
+      },
+    });
+
+    const prof = await s.getProfile(ID);
+    assert.strictEqual(urls.length, 1);
+    assert.match(urls[0], /GetPlayerSummaries\/v0002\/\?key=SECRET_KEY&steamids=76561199246661188/);
+    assert.strictEqual(prof.avatarUrl, "https://avatars.steamstatic.com/test_full.jpg");
+    assert.strictEqual(prof.createdUnix, 1645833600);
+  });
+
+  it("falls back to XML profile if Steam Web API returns no players", async () => {
+    const s = new SteamAvatarService({
+      apiKey: "SECRET_KEY",
+      sleep: noSleep,
+      minGapMs: 0,
+      fetchImpl: async (u) => {
+        if (u.includes("GetPlayerSummaries")) {
+          return res(200, JSON.stringify({ response: { players: [] } }));
+        }
+        return res(200, `<profile><avatarFull><![CDATA[https://cdn/xml_avatar.jpg]]></avatarFull><memberSince>May 27, 2015</memberSince></profile>`);
+      },
+    });
+
+    const prof = await s.getProfile("76561198230689552");
+    assert.strictEqual(prof.avatarUrl, "https://cdn/xml_avatar.jpg");
+    assert.strictEqual(prof.createdUnix, Math.floor(Date.parse("May 27, 2015 UTC") / 1000));
+  });
+});
+
+describe("estimateSteamAccountAge", () => {
+  it("estimates account creation year from sequential Steam64 ID", () => {
+    const umaEst = estimateSteamAccountAge("76561198230689552");
+    assert.ok(umaEst);
+    const date = new Date(umaEst * 1000);
+    assert.strictEqual(date.getUTCFullYear(), 2015);
+
+    const ecEst = estimateSteamAccountAge("76561199246661188");
+    assert.ok(ecEst);
+    const dateEc = new Date(ecEst * 1000);
+    assert.strictEqual(dateEc.getUTCFullYear(), 2022);
+  });
+
+  it("returns null for malformed or non-user Steam IDs", () => {
+    assert.strictEqual(estimateSteamAccountAge("not_a_number"), null);
+    assert.strictEqual(estimateSteamAccountAge("123"), null);
   });
 });

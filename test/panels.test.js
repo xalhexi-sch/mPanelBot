@@ -289,6 +289,9 @@ describe("steam profile, join card and farmbots", () => {
     assert.strictEqual(f.Discord, "<@555>");
     assert.strictEqual(f.Group, "[Team Rocket](https://steamcommunity.com/groups/tr)");
     assert.strictEqual(f.Created, "<t:1378252800:R>");
+    assert.strictEqual(e.fields.length, 6, "3x2 grid with spacer field for alignment");
+    assert.strictEqual(e.fields[5].name, "\u200b");
+    assert.strictEqual(e.fields[5].inline, true);
   });
 
   it("farmbots embed lists farmers / builders / gatherers like the old bot", () => {

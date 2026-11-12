@@ -1,4 +1,5 @@
 const { EmbedBuilder } = require("discord.js");
+const { estimateSteamAccountAge } = require("../../services/steamAvatar");
 
 const SENSITIVE_CMD_PATTERN = /\b(login|logon|register|password|apikey|token|auth|link)\b\s+([^\s]+)/gi;
 const HIGH_ENTROPY_TOKEN = /\b[a-zA-Z0-9_\-]{24,}\b/g;
@@ -218,6 +219,14 @@ class DiscordLogger {
 
     const joined = kind === "join";
     const duration = data.durationSeconds ?? data.sessionLengthSeconds;
+
+    let createdUnix = profile.createdUnix;
+    let isEstimate = Boolean(profile.isEstimate);
+    if (!createdUnix && steamId) {
+      createdUnix = estimateSteamAccountAge(steamId);
+      isEstimate = Boolean(createdUnix);
+    }
+
     const embed = new EmbedBuilder()
       .setTitle(joined ? "Player Joined" : "Player Left")
       .setColor(joined ? 0x57f287 : 0xed4245)
@@ -229,8 +238,15 @@ class DiscordLogger {
         { name: "Discord", value: discordText, inline: true },
         { name: "Group", value: groupText, inline: true },
         joined
-          ? { name: "Created", value: profile.createdUnix ? `<t:${profile.createdUnix}:R>` : "Unknown / private profile", inline: true }
-          : { name: "Session Time", value: duration != null ? formatDuration(duration) : "Unknown", inline: true }
+          ? {
+              name: "Created",
+              value: createdUnix
+                ? (isEstimate ? `<t:${createdUnix}:R> *(est.)*` : `<t:${createdUnix}:R>`)
+                : "Unknown / private profile",
+              inline: true,
+            }
+          : { name: "Session Time", value: duration != null ? formatDuration(duration) : "Unknown", inline: true },
+        { name: "\u200b", value: "\u200b", inline: true }
       );
     if (profile.avatarUrl) embed.setThumbnail(profile.avatarUrl);
     return { embed, pending };

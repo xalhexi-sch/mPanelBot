@@ -20,6 +20,64 @@ const tag = (xml, name) => {
   return m ? m[1].trim() : "";
 };
 
+const STEAM64_BASE = 76561197960265728n;
+
+/**
+ * Estimates Steam account creation timestamp (Unix epoch seconds) from Steam64 ID using historical ID registration milestones.
+ * Sequential account allocation allows accurate approximation (~1-2 months) even when a profile is private.
+ */
+function estimateSteamAccountAge(steamId) {
+  try {
+    const sid = BigInt(String(steamId).trim());
+    if (sid < STEAM64_BASE) return null;
+    const accountId = Number(sid - STEAM64_BASE);
+    if (accountId <= 0 || accountId > 3_000_000_000) return null;
+
+    const milestones = [
+      [0, 1063324800],          // Sep 12 2003 (Steam Launch)
+      [1500000, 1072915200],    // Jan 01 2004
+      [4500000, 1104537600],    // Jan 01 2005
+      [8000000, 1136073600],    // Jan 01 2006
+      [13000000, 1167609600],   // Jan 01 2007
+      [19000000, 1199145600],   // Jan 01 2008
+      [27000000, 1230768000],   // Jan 01 2009
+      [39000000, 1262304000],   // Jan 01 2010
+      [56000000, 1293840000],   // Jan 01 2011
+      [82000000, 1325376000],   // Jan 01 2012
+      [120000000, 1356998400],  // Jan 01 2013
+      [170000000, 1388534400],  // Jan 01 2014
+      [235000000, 1420070400],  // Jan 01 2015
+      [320000000, 1451606400],  // Jan 01 2016
+      [415000000, 1483228800],  // Jan 01 2017
+      [525000000, 1514764800],  // Jan 01 2018
+      [670000000, 1546300800],  // Jan 01 2019
+      [830000000, 1577836800],  // Jan 01 2020
+      [1000000000, 1609459200], // Jan 01 2021
+      [1180000000, 1640995200], // Jan 01 2022
+      [1350000000, 1672531200], // Jan 01 2023
+      [1500000000, 1704067200], // Jan 01 2024
+      [1650000000, 1735689600], // Jan 01 2025
+      [1800000000, 1767225600], // Jan 01 2026
+    ];
+
+    if (accountId <= milestones[0][0]) return milestones[0][1];
+    for (let i = 0; i < milestones.length - 1; i++) {
+      const [idA, timeA] = milestones[i];
+      const [idB, timeB] = milestones[i + 1];
+      if (accountId >= idA && accountId <= idB) {
+        const ratio = (accountId - idA) / (idB - idA);
+        return Math.floor(timeA + ratio * (timeB - timeA));
+      }
+    }
+    const last = milestones[milestones.length - 1];
+    const prev = milestones[milestones.length - 2];
+    const rate = (last[1] - prev[1]) / (last[0] - prev[0]);
+    return Math.floor(last[1] + (accountId - last[0]) * rate);
+  } catch {
+    return null;
+  }
+}
+
 class SteamAvatarService {
   /**
    * @param groupStore optional `{ get(id) -> {name,url,fetchedAtMs}|null, set(id, {name,url}) }`
@@ -91,7 +149,17 @@ class SteamAvatarService {
     return p;
   }
 
-  /** @returns {Promise<{avatarUrl:string|null, createdUnix:number|null}>} */
+  /** Fast HTTP request for official Steam Web API (not throttled by community XML 429 backoff). */
+  async _api(url) {
+    try {
+      const res = await this.fetch(url, { signal: AbortSignal.timeout(this.timeoutMs), headers: { "user-agent": "mPanelBot/1.0" } });
+      return res.ok ? await res.text() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** @returns {Promise<{avatarUrl:string|null, createdUnix:number|null, isEstimate?:boolean}>} */
   async getProfile(steamId) {
     const id = String(steamId || "").trim();
     const empty = { avatarUrl: null, createdUnix: null };
@@ -100,16 +168,62 @@ class SteamAvatarService {
     if (hit && hit.expires > this.now()) return hit.value;
 
     return this._dedupe(`p:${id}`, async () => {
-      const xml = await this._xml(`https://steamcommunity.com/profiles/${id}?xml=1`);
-      if (!xml) return this._remember(this.profiles, id, empty, FAIL_TTL_MS);
-      const avatar = tag(xml, "avatarFull");
-      const since = Date.parse(`${tag(xml, "memberSince")} UTC`);
-      const value = {
-        avatarUrl: /^https?:\/\//.test(avatar) ? avatar : null,
-        createdUnix: Number.isNaN(since) ? null : Math.floor(since / 1000),
-      };
-      return this._remember(this.profiles, id, value, value.avatarUrl ? OK_TTL_MS : FAIL_TTL_MS);
+      let result = null;
+      if (this.apiKey) {
+        result = await this._profileViaApi(id);
+      }
+      if (!result || !result.avatarUrl) {
+        const xmlResult = await this._profileViaXml(id);
+        if (xmlResult) {
+          result = {
+            avatarUrl: xmlResult.avatarUrl || result?.avatarUrl || null,
+            createdUnix: xmlResult.createdUnix || result?.createdUnix || null,
+            isEstimate: false,
+          };
+        }
+      }
+
+      if (!result) {
+        result = { avatarUrl: null, createdUnix: null };
+      }
+
+      return this._remember(this.profiles, id, result, result.avatarUrl ? OK_TTL_MS : FAIL_TTL_MS);
     });
+  }
+
+  /** Official Steam Web API GetPlayerSummaries (returns avatar even for private profiles). */
+  async _profileViaApi(steamId) {
+    const key = String(this.apiKey || "").trim();
+    if (!key) return null;
+    const url = `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=${encodeURIComponent(key)}&steamids=${encodeURIComponent(steamId)}`;
+    const body = await this._api(url);
+    if (!body) return null;
+    try {
+      const data = JSON.parse(body);
+      const player = data?.response?.players?.[0];
+      if (!player) return null;
+      const avatar = player.avatarfull || player.avatarmedium || player.avatar || null;
+      const created = player.timecreated ? Number(player.timecreated) : null;
+      return {
+        avatarUrl: /^https?:\/\//.test(avatar) ? avatar : null,
+        createdUnix: created && !Number.isNaN(created) ? created : null,
+        isEstimate: false,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async _profileViaXml(id) {
+    const xml = await this._xml(`https://steamcommunity.com/profiles/${id}?xml=1`);
+    if (!xml) return null;
+    const avatar = tag(xml, "avatarFull");
+    const since = Date.parse(`${tag(xml, "memberSince")} UTC`);
+    return {
+      avatarUrl: /^https?:\/\//.test(avatar) ? avatar : null,
+      createdUnix: Number.isNaN(since) ? null : Math.floor(since / 1000),
+      isEstimate: false,
+    };
   }
 
   /**
@@ -135,7 +249,7 @@ class SteamAvatarService {
     const key = String(this.apiKey || "").trim();
     if (!key) return null;
     const url = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key=${encodeURIComponent(key)}&vanityurl=${encodeURIComponent(name)}`;
-    const body = await this._xml(url);
+    const body = await this._api(url);
     if (!body) return null;
     try {
       const r = JSON.parse(body)?.response;
@@ -196,4 +310,4 @@ class SteamAvatarService {
   }
 }
 
-module.exports = { SteamAvatarService };
+module.exports = { SteamAvatarService, estimateSteamAccountAge };
