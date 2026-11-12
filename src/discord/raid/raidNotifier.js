@@ -19,15 +19,8 @@ class RaidNotifier {
 
     const objName = String(alert.objectName || "").trim().toLowerCase();
     const weapon = String(alert.weapon || alert.weaponName || "").trim().toLowerCase();
-    const isCharge = objName === "c4" || objName.includes("charge");
-    const isDetonator = weapon.includes("detonat");
-
-    // Self-destruction or friendly fire is not a raid (allow charges broken by non-detonator attacks for solo testing)
-    if (attackerSid && ownerSid && String(attackerSid).trim() === String(ownerSid).trim()) {
-      if (!isCharge || isDetonator) {
-        return;
-      }
-    }
+    const isCharge = objName.includes("charge") || objName.includes("c4") || objName.includes("c-4") || objName.includes("breach") || objName.includes("satchel");
+    const isDetonator = weapon.includes("detonat") || weapon.includes("clacker");
 
     // Charges/C4 are ignored when destroyed by a Detonator (raid explosion encounter)
     if (isCharge && isDetonator) {
