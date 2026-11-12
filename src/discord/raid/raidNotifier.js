@@ -22,9 +22,10 @@ class RaidNotifier {
       return;
     }
 
-    // Charges and explosives are raiding munitions, not base structures
+    // Charges/C4 are ignored only when destroyed by a Detonator (raid explosion encounter)
     const objName = String(alert.objectName || "").trim().toLowerCase();
-    if (objName === "c4" || objName.includes("charge")) {
+    const weapon = String(alert.weapon || alert.weaponName || "").trim().toLowerCase();
+    if ((objName === "c4" || objName.includes("charge")) && weapon.includes("detonat")) {
       return;
     }
 
