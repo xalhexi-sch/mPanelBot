@@ -219,7 +219,7 @@ describe("status header, Play button and group fallback", () => {
     const e = buildServerStatusEmbed(snap, { online: true }).toJSON();
     assert.strictEqual(e.description, "> **85568392935684753 ◾️ Washington ◾️ 👥 1/24**");
     const rows = buildStatusComponents([snap], new Set(["s1"]));
-    assert.strictEqual(rows[0].toJSON().components[0].url, "https://join.unbeaten.gg/85568392935684753");
+    assert.strictEqual(rows[0].toJSON().components[0].url, "https://join.bloodhorizon.asia/85568392935684753");
     assert.deepStrictEqual(buildStatusComponents([snap], new Set()), [], "no button for an offline server");
   });
 

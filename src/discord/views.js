@@ -112,7 +112,7 @@ function buildStatusComponents(snapshots, activeIds) {
       new ButtonBuilder()
         .setLabel(all.length > 1 ? `Play ${String(s.serverName || s.serverId).slice(0, 30)}` : "Play")
         .setStyle(ButtonStyle.Link)
-        .setURL(`https://join.unbeaten.gg/${s.serverSteamId}`)
+        .setURL(`https://join.bloodhorizon.asia/${s.serverSteamId}`)
     );
   return buttons.length ? [new ActionRowBuilder().addComponents(buttons)] : [];
 }
